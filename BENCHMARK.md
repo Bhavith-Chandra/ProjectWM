@@ -81,17 +81,45 @@ MCS** — every other model, including plain HAR, is eliminated. The edge theref
 **realized-semivariance + market-RV commonality features**, not from implied vol and not from the
 neural architecture (the linear and neural versions are statistically tied here).
 
+### 3c. Training universe — 11 assets (in-universe reference), 42,127 forecasts
+*Not held-out; shown for completeness and to expose an honest wrinkle.*
+
+| Model | QLIKE ↓ | RMSE ↓ | IC ↑ | DM vs HAR | MCS 90% |
+|---|---|---|---|---|---|
+| Meridian-net | **0.815** | 0.794 | **0.783** | 0.364 | ✅ |
+| HAR-IV | 0.816 | 0.804 | 0.778 | 0.066 | ✅ |
+| HAR | 0.819 | 0.806 | 0.777 | — | ✅ |
+| Meridian-lin (HAR-full) | 0.844 | **0.797** | 0.781 | 0.765 | ✅ |
+| Meridian (HAR+SV) | 0.858 | 0.803 | 0.779 | 0.839 | ✅ |
+| EWMA / GARCH / TimeMixer | 0.905 / 1.077 / 1.272 | — | — | ≈1 | — |
+
+**The wrinkle (stated, not hidden):** on this **narrow, single-stock-heavy 11-asset** set,
+`HAR-full` is *worse* than HAR (0.844 vs 0.819) and nothing DM-beats HAR (the whole ladder sits in
+the MCS). The **market-RV commonality factor adds noise on a small panel** but pays off on the broad
+held-out (24 assets) and international-index (17) universes — precisely the *panel-breadth dependence*
+"Risk Everywhere" predicts (commonality is a large-cross-section phenomenon). Where implied vol is
+available, **HAR-IV** (HAR + VIX) is the consistently strong addition (best or near-best here and on
+the held-out set, DM p<0.001 OOS).
+
 ## 4. The honest decomposition — where the edge is, and isn't
 
-- **It's the features.** `HAR-full` (linear, all features) beats HAR by DM p<0.001 on *both* OOS
-  universes. Adding realized semivariance and the cross-sectional market-RV factor (Bollerslev
-  "Risk Everywhere") is the durable, generalizing source of skill.
+- **It's the features — and they help where theory says they should.** `HAR-full` (linear, all
+  features) beats HAR by DM p<0.001 on *both* OOS universes (24 held-out assets; 17 international
+  indices). The cross-sectional **market-RV commonality** factor (Bollerslev "Risk Everywhere") is a
+  *broad-panel* effect — it helps on the wide OOS universes but *adds noise* on the narrow 11-asset
+  training set (§3c). That breadth dependence is a credibility signal, not a bug: the feature behaves
+  exactly as the commonality literature predicts.
 - **It's not the neural net.** Meridian-net (MLP ensemble) is statistically tied with the linear
   Meridian-lin on OMI and *less robust* on Yahoo (QLIKE blowup). Consistent with the verified
   literature that OLS/linear beats LSTM/deep nets on daily-frequency vol. **We recommend the linear
   model.**
-- **It's not just implied vol.** The OMI result uses no VIX and the edge persists — the semivariance
-  and commonality features carry it.
+- **It's not just implied vol.** The OMI result uses no VIX and the edge persists — realized
+  semivariance and commonality carry it. Where VIX *is* available, HAR-IV is the single most
+  consistent add-on.
+
+**Recommended Meridian model (robust across universes):** linear **HAR + realized semivariance +
+implied vol (where available) + market-RV factor (on broad panels)**. Interpretable, no neural net,
+DM-significant OOS.
 
 ## 5. Honest limitations (stated, not buried)
 

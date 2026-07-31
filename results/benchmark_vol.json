@@ -1,6 +1,20 @@
 {
   "n_forecasts": 42127,
   "folds": 12,
+  "universe": "training",
+  "assets": [
+    "AAPL",
+    "EURUSD",
+    "GBPUSD",
+    "IWM",
+    "JNJ",
+    "JPM",
+    "MSFT",
+    "QQQ",
+    "SPY",
+    "USDJPY",
+    "XOM"
+  ],
   "protocol": "date-based walk-forward, min_train=1260d, test=378d, embargo=22d",
   "metrics": {
     "EWMA": {
@@ -27,6 +41,18 @@
       "IC": 0.7791230970500418,
       "DM_vs_HAR_p": 0.8387415216598711
     },
+    "HAR-IV": {
+      "QLIKE": 0.8155643864301436,
+      "RMSE_log": 0.8041362001521104,
+      "IC": 0.7782380983117534,
+      "DM_vs_HAR_p": 0.0664224025176895
+    },
+    "HAR-full": {
+      "QLIKE": 0.8445461125399469,
+      "RMSE_log": 0.7971168776104429,
+      "IC": 0.781252970176642,
+      "DM_vs_HAR_p": 0.7652242707441437
+    },
     "TimeMixer": {
       "QLIKE": 1.2715509646434118,
       "RMSE_log": 0.8515556756384687,
@@ -34,25 +60,28 @@
       "DM_vs_HAR_p": 0.9122295069901082
     },
     "Meridian-WM": {
-      "QLIKE": 0.8104200993594397,
-      "RMSE_log": 0.792299489488687,
-      "IC": 0.7830398781314073,
-      "DM_vs_HAR_p": 0.2631958858487094
+      "QLIKE": 0.8148659874070519,
+      "RMSE_log": 0.7939610383495357,
+      "IC": 0.782878468895498,
+      "DM_vs_HAR_p": 0.36396166895872467
     }
   },
   "mcs_90_included": [
     "GARCH",
     "HAR",
-    "Meridian",
+    "HAR-IV",
+    "HAR-full",
     "Meridian-WM",
     "TimeMixer"
   ],
   "mcs_pvalues": {
-    "EWMA": 0.001,
-    "GARCH": 0.114,
-    "HAR": 0.519,
-    "Meridian": 0.125,
-    "TimeMixer": 0.169,
+    "EWMA": 0.011,
+    "GARCH": 0.139,
+    "HAR": 0.233,
+    "Meridian": 0.037,
+    "HAR-IV": 0.94,
+    "HAR-full": 0.675,
+    "TimeMixer": 0.233,
     "Meridian-WM": 1.0
   }
 }
