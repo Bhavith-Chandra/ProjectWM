@@ -48,24 +48,69 @@ DEV = "mps" if torch.backends.mps.is_available() else "cpu"
 # --------------------------------------------------------------------------- #
 # Data
 # --------------------------------------------------------------------------- #
+RICH = ["har_d", "har_w", "har_m", "lev", "pos", "vix", "ret5"]   # Meridian-WM feature set
+
+
 def build():
     d = load_all()
+    vix = np.log(d["macro"]["VIXCLS"].clip(lower=EPS))
     rows, WlogA, WlevA = [], [], []
     for a, ohlc in d["prices"].items():
         rvf = realized_variance(ohlc)
         rv = rvf["rv"].to_numpy(); ret = rvf["ret"].to_numpy()
         lrv = np.log(rv + EPS)
-        neg = np.log((np.minimum(ret, 0.0) ** 2) + EPS)
+        neg = np.log((np.minimum(ret, 0.0) ** 2) + EPS)      # bad-vol / leverage
+        pos = np.log((np.maximum(ret, 0.0) ** 2) + EPS)      # good-vol semivariance
         dates = rvf.index
         w = pd.Series(lrv).rolling(5).mean().to_numpy()
         m = pd.Series(lrv).rolling(22).mean().to_numpy()
+        r5 = pd.Series(ret).rolling(5).sum().to_numpy()
+        vx = vix.reindex(dates).ffill().to_numpy()
         for t in range(L, len(rv) - 1):
-            if not np.isfinite([lrv[t], w[t], m[t], neg[t], lrv[t + 1]]).all():
+            if not np.isfinite([lrv[t], w[t], m[t], neg[t], pos[t], lrv[t + 1]]).all():
                 continue
-            rows.append((a, dates[t], rv[t], lrv[t + 1], lrv[t], w[t], m[t], neg[t], rv[t + 1]))
+            vt = vx[t] if np.isfinite(vx[t]) else np.log(15.0)   # VIX fallback
+            r5t = r5[t] if np.isfinite(r5[t]) else 0.0
+            rows.append((a, dates[t], rv[t], lrv[t + 1], lrv[t], w[t], m[t], neg[t], pos[t], vt, r5t, rv[t + 1]))
             WlogA.append(lrv[t - L + 1:t + 1]); WlevA.append(neg[t - L + 1:t + 1])
-    R = pd.DataFrame(rows, columns=["asset", "date", "rv", "y", "har_d", "har_w", "har_m", "lev", "rv_next"])
+    R = pd.DataFrame(rows, columns=["asset", "date", "rv", "y", "har_d", "har_w", "har_m",
+                                    "lev", "pos", "vix", "ret5", "rv_next"])
     return R, np.asarray(WlogA, np.float32), np.asarray(WlevA, np.float32), d
+
+
+class MLP(nn.Module):
+    def __init__(self, k, hid=32):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(k, hid), nn.GELU(), nn.Linear(hid, hid), nn.GELU(), nn.Linear(hid, 1))
+
+    def forward(self, x):
+        return self.net(x).squeeze(-1)
+
+
+def meridian_wm(tr, te, seeds=4, epochs=70):
+    """Rich-feature seed-ensemble (Meridian's engineered forecaster): realized semivariance
+    (good/bad), implied vol, weekly return + the HAR cascade. MSE-trained, Jensen-corrected."""
+    Xtr = tr[RICH].to_numpy(np.float32); ytr = tr["y"].to_numpy(np.float32)
+    Xte = te[RICH].to_numpy(np.float32)
+    mu, sd = Xtr.mean(0), Xtr.std(0) + 1e-6
+    Xtr_s = torch.tensor((Xtr - mu) / sd).to(DEV); yt = torch.tensor(ytr).to(DEV)
+    Xte_s = torch.tensor((Xte - mu) / sd).to(DEV)
+    preds_tr, preds_te = [], []
+    for s in range(seeds):
+        torch.manual_seed(s)
+        net = MLP(len(RICH)).to(DEV)
+        opt = torch.optim.Adam(net.parameters(), lr=2e-3, weight_decay=1e-4)
+        n = len(yt)
+        for _ in range(epochs):
+            perm = torch.randperm(n, device=DEV)
+            for i in range(0, n, 1024):
+                idx = perm[i:i + 1024]
+                opt.zero_grad(); ((net(Xtr_s[idx]) - yt[idx]) ** 2).mean().backward(); opt.step()
+        with torch.no_grad():
+            preds_tr.append(net(Xtr_s).cpu().numpy()); preds_te.append(net(Xte_s).cpu().numpy())
+    ptr = np.mean(preds_tr, 0); pte = np.mean(preds_te, 0)
+    jb = 0.5 * np.var(ytr - ptr)                              # Jensen (log→level)
+    return pte, jb                                            # (conditional log-mean, jb)
 
 
 # --------------------------------------------------------------------------- #
@@ -127,7 +172,7 @@ def har_predict(tr, te, cols):
     beta, *_ = np.linalg.lstsq(A, tr["y"].to_numpy(), rcond=None)
     jb = 0.5 * np.var(tr["y"].to_numpy() - A @ beta)
     B = np.column_stack([np.ones(len(te))] + [te[c].to_numpy() for c in cols])
-    return B @ beta + jb                                    # log-var forecast (Jensen-corrected)
+    return B @ beta, jb                                     # (conditional log-mean, Jensen jb)
 
 
 def ewma_series(rv, lam=0.94):
@@ -179,35 +224,40 @@ def main():
         tr, te = R[tr_mask], R[te_mask]
         out = te[["asset", "date", "y", "rv_next"]].copy()
 
-        # HAR & Meridian (HAR+leverage)
-        out["HAR"] = har_predict(tr, te, ["har_d", "har_w", "har_m"])
-        out["Meridian"] = har_predict(tr, te, ["har_d", "har_w", "har_m", "lev"])
+        # Each model stores BOTH: out[m] = conditional LOG-MEAN (for RMSE) and
+        # out[m+"__var"] = variance forecast (for QLIKE/IC). Every log model gets its OWN
+        # train-estimated Jensen jb — fair, so no model is advantaged by (missing) calibration.
+        def log_model(name, pm, jb):
+            out[name] = pm; out[name + "__var"] = np.exp(pm + jb)
 
-        # EWMA & GARCH — level forecasts, train-mean calibrated, per asset
+        log_model("HAR", *har_predict(tr, te, ["har_d", "har_w", "har_m"]))
+        log_model("Meridian", *har_predict(tr, te, ["har_d", "har_w", "har_m", "lev"]))
+        log_model("Meridian-WM", *meridian_wm(tr, te))
+
+        # EWMA & GARCH — level (variance) forecasts, train-mean calibrated, per asset
         ew, ga = np.full(len(te), np.nan), np.full(len(te), np.nan)
         for a in te["asset"].unique():
             aidx = te["asset"].to_numpy() == a
             rv = per[a]["rv"]; ewf = per[a]["ewma"]
             tdates = te["date"].to_numpy()[aidx]
-            # EWMA calibration on train dates
             trd = per[a]["rv"].index < cutoff
             cE = np.nanmean(rv[trd].to_numpy()) / (np.nanmean(ewf[trd].to_numpy()) + EPS)
             ew[aidx] = cE * ewf.reindex(tdates).to_numpy()
-            # GARCH
             s2 = garch_sigma2(per[a]["ret"].to_numpy(), np.asarray(per[a]["ret"].index < cutoff))
             if s2 is not None:
                 s2s = pd.Series(s2, index=per[a]["ret"].index)
                 cG = np.nanmean(rv[trd].to_numpy()) / (np.nanmean(s2s[per[a]["ret"].index < cutoff].to_numpy()) + EPS)
                 ga[aidx] = cG * s2s.reindex(tdates).to_numpy()
-        out["EWMA"] = np.log(np.clip(ew, EPS, None))
-        out["GARCH"] = np.log(np.clip(ga, EPS, None))
+        out["EWMA__var"] = np.clip(ew, EPS, None); out["EWMA"] = np.log(out["EWMA__var"])
+        out["GARCH__var"] = np.clip(ga, EPS, None); out["GARCH"] = np.log(out["GARCH__var"])
 
-        # TimeMixer — pooled, trained on this fold's train windows
-        Xtr = np.stack([Wlog[tr_mask], Wlev[tr_mask]], 1)
-        net = train_timemixer(Xtr, tr["y"].to_numpy().astype(np.float32), mu, sd)
-        Xte = torch.tensor((np.stack([Wlog[te_mask], Wlev[te_mask]], 1) - mu) / sd).to(DEV)
+        # TimeMixer — pooled; its own train-estimated Jensen (fair QLIKE, same as log models)
+        Xtr = np.stack([Wlog[tr_mask], Wlev[tr_mask]], 1); ytr = tr["y"].to_numpy().astype(np.float32)
+        net = train_timemixer(Xtr, ytr, mu, sd)
         with torch.no_grad():
-            out["TimeMixer"] = (net(Xte).cpu().numpy() * sd + mu)
+            ptr_tm = net(torch.tensor((Xtr - mu) / sd).to(DEV)).cpu().numpy() * sd + mu
+            pm_tm = net(torch.tensor((np.stack([Wlog[te_mask], Wlev[te_mask]], 1) - mu) / sd).to(DEV)).cpu().numpy() * sd + mu
+        log_model("TimeMixer", pm_tm, 0.5 * np.var(ytr - ptr_tm))
 
         preds.append(out)
         print(f"  fold {fold}: train {tr_mask.sum()}  test {te_mask.sum()}  "
@@ -215,12 +265,13 @@ def main():
         i += TEST_D
 
     P = pd.concat(preds, ignore_index=True)
-    models = ["EWMA", "GARCH", "HAR", "Meridian", "TimeMixer"]
+    models = ["EWMA", "GARCH", "HAR", "Meridian", "TimeMixer", "Meridian-WM"]
     rv_true = P["rv_next"].to_numpy()
     y_log = P["y"].to_numpy()
     for m in models:
         P[m] = P[m].replace([np.inf, -np.inf], np.nan)
-    loss = {m: qlike(rv_true, np.exp(P[m].to_numpy())) for m in models}
+        P[m + "__var"] = P[m + "__var"].replace([np.inf, -np.inf], np.nan)
+    loss = {m: qlike(rv_true, P[m + "__var"].to_numpy()) for m in models}   # QLIKE on variance forecast
     cov = {m: int(np.isfinite(P[m].to_numpy()).sum()) for m in models}
     print(f"\nBenchmark — pooled OOS ({len(P)} rows, {fold} walk-forward folds, purge+embargo)")
     print(f"  coverage (finite preds): " + ", ".join(f"{m}={cov[m]}" for m in models) + "\n")
@@ -232,8 +283,8 @@ def main():
     for m in models:
         mk = np.isfinite(P[m].to_numpy()) & np.isfinite(rv_true)
         q = float(np.nanmean(loss[m][mk]))
-        rmse = float(np.sqrt(np.nanmean((y_log[mk] - P[m].to_numpy()[mk]) ** 2)))
-        ic = float(spearmanr(np.exp(0.5 * P[m].to_numpy()[mk]), np.sqrt(rv_true[mk]))[0])
+        rmse = float(np.sqrt(np.nanmean((y_log[mk] - P[m].to_numpy()[mk]) ** 2)))   # RMSE on log-mean
+        ic = float(spearmanr(np.sqrt(P[m + "__var"].to_numpy()[mk]), np.sqrt(rv_true[mk]))[0])
         qmeans[m] = q
         if m == "HAR":
             dmp, p = "—", None

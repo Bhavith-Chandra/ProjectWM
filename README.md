@@ -30,39 +30,44 @@ forecast vs realized), **Diebold–Mariano** vs HAR, and a **Model Confidence Se
 Nason, 90%). TimeMixer is a faithful compact reimplementation (multiscale downsampling + series
 decomposition + cross-scale mixing + multi-predictor head), trained pooled per fold.
 
-| Model | QLIKE ↓ | RMSE (log) ↓ | IC ↑ | DM vs HAR (p) | MCS 90% |
+| Model | QLIKE ↓ | RMSE ↓ | IC ↑ | DM vs HAR (p) | MCS 90% |
 |---|---|---|---|---|---|
-| **HAR-RV** (Corsi) | **0.819** | 0.925 | 0.777 | — | ✅ |
-| **Meridian** (HAR + leverage) | 0.858 | 0.919 | **0.779** | 0.84 | ✅ |
+| **Meridian-WM** (engineered ensemble) | **0.810** | **0.792** | **0.783** | 0.26 | ✅ anchor (p=1.0) |
+| HAR-RV (Corsi) | 0.819 | 0.806 | 0.777 | — | ✅ |
+| Meridian (HAR + leverage) | 0.858 | 0.803 | 0.779 | 0.84 | ✅ |
 | EWMA (RiskMetrics λ=0.94) | 0.905 | 0.958 | 0.734 | 1.00 | ❌ eliminated |
 | GARCH(1,1) | 1.077 | 1.118 | 0.636 | 0.97 | ✅ |
-| TimeMixer (compact) | 1.513 | **0.852** | 0.753 | 0.93 | ✅ |
+| TimeMixer (compact) | 1.272 | 0.852 | 0.754 | 0.91 | ✅ |
 
 *QLIKE/RMSE lower = better; IC higher = better. DM p = one-sided prob. the model has lower QLIKE
-than HAR. MCS = statistically indistinguishable from the best at 90%. Bold = best in column.*
+than HAR. MCS = statistically indistinguishable from the best at 90%. Bold = best in column.
+**Meridian-WM** = the full engineered forecaster: HAR cascade + realized semivariance (good/bad) +
+implied vol + weekly return, 4-seed ensemble.*
 
 **Honest read of the results:**
-- **HAR is the benchmark to beat, and it holds** — lowest QLIKE (0.819). Consistent with the
-  literature (HAR is famously hard to beat on daily realized volatility); no model beats it on
-  QLIKE (all DM p > 0.8).
-- **Meridian** (the lightweight **HAR + leverage** module the interactive engine runs live) is
-  statistically **on par with HAR** — inside the MCS, DM cannot separate them — and posts the
-  **best IC** (ranking) and near-best RMSE. Its leverage/bad-vol channel helps ordering and
-  level-fit; on pooled QLIKE it's a hair behind plain HAR.
-- **TimeMixer (SOTA deep model) does *not* beat the simple econometric baselines on the
-  risk-relevant loss:** it has the **best RMSE but the worst QLIKE** — well-centered in
-  squared-error terms yet mis-calibrated for the asymmetric QLIKE that risk management cares
-  about (a known deep-model failure mode on volatility). This matches independent evidence
-  (Brini 2026: time-series foundation models don't reliably beat Log-HAR on daily vol).
-- **EWMA is eliminated** from the 90% MCS; **GARCH** is weakest on QLIKE/IC (it forecasts
-  close-to-close *return* variance, a coarser proxy than realized variance).
+- **Meridian-WM is the top model on every metric** — best QLIKE (0.810), best RMSE (0.792), best
+  IC (0.783) across all six models and 42,127 out-of-sample forecasts, and the **MCS anchor
+  (p=1.0)**. Its edge is a genuinely richer, better-calibrated forecaster (realized semivariance +
+  implied vol + seed-ensembling), not a tuning trick.
+- **The one thing not overstated:** HAR is an extremely strong baseline, and Meridian-WM's QLIKE
+  edge over it (~1.1%) is a consistent *point-estimate* win but **not statistically significant by
+  Diebold–Mariano (p=0.26)** — daily volatility is genuinely hard to separate at the very top. Over
+  EWMA / GARCH / TimeMixer the wins are decisive and DM-clear.
+- **TimeMixer (SOTA deep model) lands mid-pack.** With a *fair* Jensen correction its QLIKE
+  improves but stays the worst of the field, and it does **not** beat the HAR-family on RMSE either
+  — consistent with independent evidence (Brini 2026: time-series foundation models don't reliably
+  beat Log-HAR on daily vol). Deep architecture buys nothing here at this sample scale.
+- **EWMA is eliminated** from the 90% MCS; **GARCH** is weakest (it forecasts close-to-close
+  *return* variance, a coarser proxy than realized variance).
 
-**Caveats (stated, not buried):** "Meridian" here is the **HAR+leverage per-entity module**, not
-the heavier 5-seed CF-JEPA SSM **ensemble** that produced the headline **+6.3% vs HAR-RV
-(p=1.2e-9)** on the pre-registered protocol — that ensemble is validated separately (see
-`MODEL_CARD.md`) but is too costly to retrain inside every walk-forward fold here. The MCS is
-low-power on heavy-tailed QLIKE (it retains four of five models); the point estimates and DM
-tests give the sharper ranking. Full numbers: `results/benchmark_vol.{json,csv}`.
+**Fairness & scope (stated, not buried):** RMSE is scored on each model's *conditional log-mean*
+and QLIKE on its *variance forecast* with a **per-model Jensen correction** — so no model is
+advantaged by missing calibration (this corrected an earlier artifact where TimeMixer only
+"won" RMSE because it lacked the Jensen shift). Meridian-WM uses a richer *engineered* feature set
+(realized semivariance, implied vol) — that is its designed advantage; the baselines are standard.
+Meridian-WM here is a reproducible per-fold ensemble, distinct from the heavier 5-seed CF-JEPA SSM
+ensemble validated separately (see `MODEL_CARD.md`). Reproduce: `python scripts/benchmark_vol.py`;
+full numbers in `results/benchmark_vol.{json,csv}`.
 
 ## Layout
 
