@@ -1,0 +1,82 @@
+{
+  "n_forecasts": 49450,
+  "folds": 9,
+  "universe": "omi",
+  "assets": [
+    "AEX",
+    "AORD",
+    "BVSP",
+    "CAC",
+    "DAX",
+    "FTSE",
+    "HSI",
+    "IBEX",
+    "IPC",
+    "KOSPI",
+    "MIB",
+    "N225",
+    "NIFTY",
+    "SMI",
+    "STI",
+    "STOXX50",
+    "TSX"
+  ],
+  "protocol": "date-based walk-forward, min_train=1260d, test=378d, embargo=22d",
+  "metrics": {
+    "EWMA": {
+      "QLIKE": 0.23407398437653637,
+      "RMSE_log": 0.6435224602392985,
+      "IC": 0.7930712774224743,
+      "DM_vs_HAR_p": 1.0
+    },
+    "GARCH": {
+      "QLIKE": 0.24829272115738632,
+      "RMSE_log": 0.6882487638976984,
+      "IC": 0.7582986364299725,
+      "DM_vs_HAR_p": 1.0
+    },
+    "HAR": {
+      "QLIKE": 0.1681239761978503,
+      "RMSE_log": 0.5347696429834431,
+      "IC": 0.845917575535144,
+      "DM_vs_HAR_p": null
+    },
+    "Meridian": {
+      "QLIKE": 0.164693277237525,
+      "RMSE_log": 0.5283163103405117,
+      "IC": 0.8500011352157313,
+      "DM_vs_HAR_p": 5.793655002937533e-26
+    },
+    "HAR-full": {
+      "QLIKE": 0.16115290650882358,
+      "RMSE_log": 0.5224141520935555,
+      "IC": 0.8526781968598487,
+      "DM_vs_HAR_p": 3.3163979670332654e-32
+    },
+    "TimeMixer": {
+      "QLIKE": 0.1755688724429149,
+      "RMSE_log": 0.5472302799921279,
+      "IC": 0.839781637032609,
+      "DM_vs_HAR_p": 0.9999999824075734
+    },
+    "Meridian-WM": {
+      "QLIKE": 0.16098079740925236,
+      "RMSE_log": 0.5213036833089202,
+      "IC": 0.8530569448194618,
+      "DM_vs_HAR_p": 5.6923745402145995e-06
+    }
+  },
+  "mcs_90_included": [
+    "HAR-full",
+    "Meridian-WM"
+  ],
+  "mcs_pvalues": {
+    "EWMA": 0.0,
+    "GARCH": 0.0,
+    "HAR": 0.0,
+    "Meridian": 0.0,
+    "HAR-full": 0.923,
+    "TimeMixer": 0.0,
+    "Meridian-WM": 1.0
+  }
+}

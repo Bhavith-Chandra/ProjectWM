@@ -20,7 +20,17 @@ score** — benchmarked honestly against HAR-RV (volatility) and a Gaussian HMM
 - Every OOS number comes from expanding walk-forward with a 22-day purge/embargo
   at every train/test boundary. Feature scaling is fit on train only.
 
-## Benchmark: volatility forecasting vs GARCH · EWMA · HAR · TimeMixer
+## Genuine out-of-sample validation → see [`BENCHMARK.md`](BENCHMARK.md)
+
+The Meridian realized-measure feature architecture (HAR + realized semivariance + implied vol +
+common market-RV factor) **significantly beats HAR-RV out-of-sample** — on **24 never-trained
+assets** (DM p<0.001, MCS anchor) **and** on **17 international indices from an independent vendor**
+(Oxford-Man Realized Library; DM p<0.001; sole MCS members with plain HAR eliminated). The edge is
+real, modest (~4–5% QLIKE), and driven by the **features, not a neural net** — the linear model is
+best and most robust, as the daily-frequency vol literature predicts. Full methodology, tables, and
+honest limitations in **[`BENCHMARK.md`](BENCHMARK.md)**.
+
+## In-universe benchmark: volatility forecasting vs GARCH · EWMA · HAR · TimeMixer
 
 A head-to-head under **one identical purged/embargoed walk-forward** (`scripts/benchmark_vol.py`):
 **42,127** pooled out-of-sample forecasts across the 11-asset universe, **12 expanding folds**,

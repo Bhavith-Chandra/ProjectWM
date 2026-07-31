@@ -1,0 +1,97 @@
+{
+  "n_forecasts": 91437,
+  "folds": 12,
+  "universe": "heldout",
+  "assets": [
+    "AUDUSD",
+    "BA",
+    "CAT",
+    "CVX",
+    "DAX",
+    "DIA",
+    "DIS",
+    "EEM",
+    "EFA",
+    "FTSE",
+    "GLD",
+    "GS",
+    "HSI",
+    "HYG",
+    "KO",
+    "NIKKEI",
+    "NKE",
+    "PFE",
+    "TLT",
+    "USDCAD",
+    "USDCHF",
+    "USO",
+    "VZ",
+    "WMT"
+  ],
+  "protocol": "date-based walk-forward, min_train=1260d, test=378d, embargo=22d",
+  "metrics": {
+    "EWMA": {
+      "QLIKE": 0.4073098214493737,
+      "RMSE_log": 0.8770713514280535,
+      "IC": 0.7709031657381659,
+      "DM_vs_HAR_p": 1.0
+    },
+    "GARCH": {
+      "QLIKE": 0.42321111705372455,
+      "RMSE_log": 0.978079043845905,
+      "IC": 0.7492930168665963,
+      "DM_vs_HAR_p": 1.0
+    },
+    "HAR": {
+      "QLIKE": 0.350578212463067,
+      "RMSE_log": 0.7688049784639495,
+      "IC": 0.7980929229589068,
+      "DM_vs_HAR_p": null
+    },
+    "Meridian": {
+      "QLIKE": 0.348968890348354,
+      "RMSE_log": 0.7667373090495843,
+      "IC": 0.7991054594293338,
+      "DM_vs_HAR_p": 0.1980947516499975
+    },
+    "HAR-IV": {
+      "QLIKE": 0.3447379395992903,
+      "RMSE_log": 0.7666445006204236,
+      "IC": 0.7991658268198316,
+      "DM_vs_HAR_p": 6.018248843447312e-09
+    },
+    "HAR-full": {
+      "QLIKE": 0.3427938458497748,
+      "RMSE_log": 0.7621244286691373,
+      "IC": 0.8011158728314512,
+      "DM_vs_HAR_p": 3.9369320128294176e-05
+    },
+    "TimeMixer": {
+      "QLIKE": 0.42369003184500564,
+      "RMSE_log": 0.7933169827331332,
+      "IC": 0.7856592462675646,
+      "DM_vs_HAR_p": 0.9715508331585573
+    },
+    "Meridian-WM": {
+      "QLIKE": 2.049444251903191,
+      "RMSE_log": 0.7598018892877245,
+      "IC": 0.8030907852847616,
+      "DM_vs_HAR_p": 0.920970043692655
+    }
+  },
+  "mcs_90_included": [
+    "HAR-IV",
+    "HAR-full",
+    "Meridian-WM"
+  ],
+  "mcs_pvalues": {
+    "EWMA": 0.0,
+    "GARCH": 0.0,
+    "HAR": 0.001,
+    "Meridian": 0.001,
+    "HAR-IV": 0.503,
+    "HAR-full": 1.0,
+    "TimeMixer": 0.092,
+    "Meridian-WM": 0.258
+  }
+}

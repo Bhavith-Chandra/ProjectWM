@@ -10,9 +10,11 @@ __pycache__/
 # Large, regenerable model outputs & data caches (code re-fetches / re-computes these)
 *.npy
 *.parquet
+*.xlsx
 data/stocks/
 data/broad/
 data/futures/
+data/omi/
 
 # Kept intentionally: source (meridian/, scripts/), docs (*.md), demo/,
 # deliverables (results/*.html, *.jpg, *.png, *.json, *.csv), data/fred_*.csv

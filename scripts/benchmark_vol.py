@@ -48,14 +48,19 @@ DEV = "mps" if torch.backends.mps.is_available() else "cpu"
 # --------------------------------------------------------------------------- #
 # Data
 # --------------------------------------------------------------------------- #
-RICH = ["har_d", "har_w", "har_m", "lev", "pos", "vix", "ret5"]   # Meridian-WM feature set
+RICH = ["har_d", "har_w", "har_m", "lev", "pos", "vix", "ret5", "mktrv"]   # Meridian-WM feature set
+#   mktrv = common market-RV factor (Bollerslev "Risk Everywhere"): cross-sectional mean log-RV
 
 
-def build():
+def build(prices=None, macro=None):
     d = load_all()
-    vix = np.log(d["macro"]["VIXCLS"].clip(lower=EPS))
+    if prices is None:
+        prices = d["prices"]
+    if macro is None:
+        macro = d["macro"]
+    vix = np.log(macro["VIXCLS"].clip(lower=EPS))
     rows, WlogA, WlevA = [], [], []
-    for a, ohlc in d["prices"].items():
+    for a, ohlc in prices.items():
         rvf = realized_variance(ohlc)
         rv = rvf["rv"].to_numpy(); ret = rvf["ret"].to_numpy()
         lrv = np.log(rv + EPS)
@@ -75,7 +80,9 @@ def build():
             WlogA.append(lrv[t - L + 1:t + 1]); WlevA.append(neg[t - L + 1:t + 1])
     R = pd.DataFrame(rows, columns=["asset", "date", "rv", "y", "har_d", "har_w", "har_m",
                                     "lev", "pos", "vix", "ret5", "rv_next"])
-    return R, np.asarray(WlogA, np.float32), np.asarray(WlevA, np.float32), d
+    # common market-RV factor: cross-sectional mean of daily log-RV (known at close t, causal)
+    R["mktrv"] = R.groupby("date")["har_d"].transform("mean")
+    return R, np.asarray(WlogA, np.float32), np.asarray(WlevA, np.float32), {"prices": prices, "macro": macro}
 
 
 class MLP(nn.Module):
@@ -87,18 +94,20 @@ class MLP(nn.Module):
         return self.net(x).squeeze(-1)
 
 
-def meridian_wm(tr, te, seeds=4, epochs=70):
+def meridian_wm(tr, te, feats=None, seeds=4, epochs=70):
     """Rich-feature seed-ensemble (Meridian's engineered forecaster): realized semivariance
-    (good/bad), implied vol, weekly return + the HAR cascade. MSE-trained, Jensen-corrected."""
-    Xtr = tr[RICH].to_numpy(np.float32); ytr = tr["y"].to_numpy(np.float32)
-    Xte = te[RICH].to_numpy(np.float32)
+    (good/bad), implied vol, weekly return, common market-RV + the HAR cascade. MSE-trained,
+    Jensen-corrected."""
+    feats = feats or RICH
+    Xtr = tr[feats].to_numpy(np.float32); ytr = tr["y"].to_numpy(np.float32)
+    Xte = te[feats].to_numpy(np.float32)
     mu, sd = Xtr.mean(0), Xtr.std(0) + 1e-6
     Xtr_s = torch.tensor((Xtr - mu) / sd).to(DEV); yt = torch.tensor(ytr).to(DEV)
     Xte_s = torch.tensor((Xte - mu) / sd).to(DEV)
     preds_tr, preds_te = [], []
     for s in range(seeds):
         torch.manual_seed(s)
-        net = MLP(len(RICH)).to(DEV)
+        net = MLP(len(feats)).to(DEV)
         opt = torch.optim.Adam(net.parameters(), lr=2e-3, weight_decay=1e-4)
         n = len(yt)
         for _ in range(epochs):
@@ -111,6 +120,39 @@ def meridian_wm(tr, te, seeds=4, epochs=70):
     ptr = np.mean(preds_tr, 0); pte = np.mean(preds_te, 0)
     jb = 0.5 * np.var(ytr - ptr)                              # Jensen (log→level)
     return pte, jb                                            # (conditional log-mean, jb)
+
+
+RICH_OMI = ["har_d", "har_w", "har_m", "lev", "pos", "ret5", "mktrv"]   # OMI arm: NO implied vol
+
+
+def build_omi():
+    """Build the R schema from the Oxford-Man library (independent 5-min realized measures).
+    Features come from OMI's own RV & realized semivariance — no VIX (unavailable per index)."""
+    from meridian.data_omi import load_omi
+    d = load_omi()
+    rows, WlogA, WlevA = [], [], []
+    for a, df in d.items():
+        rv = df["rv"].to_numpy()
+        rsv = df["rsv"].to_numpy()                            # bad/downside realized semivariance
+        good = np.clip(rv - rsv, EPS, None)                  # good/upside semivariance
+        ret = df["ret"].to_numpy() / 100.0                   # OMI return is in %
+        lrv = np.log(rv + EPS)
+        neg = np.log(np.clip(rsv, EPS, None))                # leverage / bad-vol (from OMI directly)
+        pos = np.log(good)
+        dates = df.index
+        w = pd.Series(lrv).rolling(5).mean().to_numpy()
+        m = pd.Series(lrv).rolling(22).mean().to_numpy()
+        r5 = pd.Series(ret).rolling(5).sum().to_numpy()
+        for t in range(L, len(rv) - 1):
+            if not np.isfinite([lrv[t], w[t], m[t], neg[t], pos[t], lrv[t + 1]]).all():
+                continue
+            rows.append((a, dates[t], rv[t], lrv[t + 1], lrv[t], w[t], m[t], neg[t], pos[t],
+                         np.log(15.0), r5[t] if np.isfinite(r5[t]) else 0.0, rv[t + 1]))
+            WlogA.append(lrv[t - L + 1:t + 1]); WlevA.append(neg[t - L + 1:t + 1])
+    R = pd.DataFrame(rows, columns=["asset", "date", "rv", "y", "har_d", "har_w", "har_m",
+                                    "lev", "pos", "vix", "ret5", "rv_next"])
+    R["mktrv"] = R.groupby("date")["har_d"].transform("mean")
+    return R, np.asarray(WlogA, np.float32), np.asarray(WlevA, np.float32), {"prices": d, "macro": None}
 
 
 # --------------------------------------------------------------------------- #
@@ -200,14 +242,30 @@ def garch_sigma2(ret, train_mask):
 # Benchmark
 # --------------------------------------------------------------------------- #
 def main():
-    print(f"Building panel … (device={DEV})")
-    R, Wlog, Wlev, d = build()
+    import os
+    heldout = os.environ.get("MERIDIAN_HELDOUT") == "1"
+    omi = os.environ.get("MERIDIAN_OMI") == "1"
+    if omi:
+        print(f"Building OMI panel (independent Oxford-Man 5-min RV, intl indices) … (device={DEV})")
+        R, Wlog, Wlev, d = build_omi(); tag = "_omi"; rich = RICH_OMI
+    elif heldout:
+        from meridian.heldout import load_heldout
+        print(f"Building HELD-OUT panel (never-trained assets) … (device={DEV})")
+        prices = load_heldout(); macro = load_all()["macro"]
+        R, Wlog, Wlev, d = build(prices, macro); tag = "_heldout"; rich = RICH
+    else:
+        print(f"Building panel … (device={DEV})")
+        R, Wlog, Wlev, d = build(); tag = ""; rich = RICH
     R = R.reset_index(drop=True)
     # per-asset precompute for EWMA / GARCH
     per = {}
     for a, o in d["prices"].items():
-        rvf = realized_variance(o)
-        per[a] = {"rv": rvf["rv"], "ret": rvf["ret"], "ewma": pd.Series(ewma_series(rvf["rv"].to_numpy()), index=rvf.index)}
+        if omi:
+            per[a] = {"rv": o["rv"], "ret": (o["ret"] / 100.0),
+                      "ewma": pd.Series(ewma_series(o["rv"].to_numpy()), index=o.index)}
+        else:
+            rvf = realized_variance(o)
+            per[a] = {"rv": rvf["rv"], "ret": rvf["ret"], "ewma": pd.Series(ewma_series(rvf["rv"].to_numpy()), index=rvf.index)}
     dates = np.array(sorted(R["date"].unique()))
     mu = Wlog.mean(); sd = Wlog.std() + 1e-6
 
@@ -232,7 +290,11 @@ def main():
 
         log_model("HAR", *har_predict(tr, te, ["har_d", "har_w", "har_m"]))
         log_model("Meridian", *har_predict(tr, te, ["har_d", "har_w", "har_m", "lev"]))
-        log_model("Meridian-WM", *meridian_wm(tr, te))
+        # strong baselines that isolate FEATURE edge from ARCHITECTURE edge:
+        if not omi:
+            log_model("HAR-IV", *har_predict(tr, te, ["har_d", "har_w", "har_m", "vix"]))
+        log_model("HAR-full", *har_predict(tr, te, rich))     # HAR with ALL Meridian features, LINEAR
+        log_model("Meridian-WM", *meridian_wm(tr, te, feats=rich))
 
         # EWMA & GARCH — level (variance) forecasts, train-mean calibrated, per asset
         ew, ga = np.full(len(te), np.nan), np.full(len(te), np.nan)
@@ -265,7 +327,8 @@ def main():
         i += TEST_D
 
     P = pd.concat(preds, ignore_index=True)
-    models = ["EWMA", "GARCH", "HAR", "Meridian", "TimeMixer", "Meridian-WM"]
+    models = (["EWMA", "GARCH", "HAR", "Meridian", "HAR-full", "TimeMixer", "Meridian-WM"] if omi
+              else ["EWMA", "GARCH", "HAR", "Meridian", "HAR-IV", "HAR-full", "TimeMixer", "Meridian-WM"])
     rv_true = P["rv_next"].to_numpy()
     y_log = P["y"].to_numpy()
     for m in models:
@@ -309,12 +372,14 @@ def main():
 
     RESULTS.mkdir(exist_ok=True)
     payload = {"n_forecasts": int(len(P)), "folds": fold,
+               "universe": "omi" if omi else ("heldout" if heldout else "training"),
+               "assets": sorted(R["asset"].unique().tolist()),
                "protocol": f"date-based walk-forward, min_train={MIN_TRAIN_D}d, test={TEST_D}d, embargo={EMBARGO_D}d",
                "metrics": summary, "mcs_90_included": included,
                "mcs_pvalues": {m: float(pvals.get(m, float("nan"))) for m in models}}
-    (RESULTS / "benchmark_vol.json").write_text(json.dumps(payload, indent=2))
-    pd.DataFrame(summary).T.to_csv(RESULTS / "benchmark_vol.csv")
-    print(f"\n  saved → results/benchmark_vol.json, results/benchmark_vol.csv")
+    (RESULTS / f"benchmark_vol{tag}.json").write_text(json.dumps(payload, indent=2))
+    pd.DataFrame(summary).T.to_csv(RESULTS / f"benchmark_vol{tag}.csv")
+    print(f"\n  saved → results/benchmark_vol{tag}.json, results/benchmark_vol{tag}.csv")
 
 
 if __name__ == "__main__":
