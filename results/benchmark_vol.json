@@ -1,0 +1,50 @@
+{
+  "n_forecasts": 42127,
+  "folds": 12,
+  "protocol": "date-based walk-forward, min_train=1260d, test=378d, embargo=22d",
+  "metrics": {
+    "EWMA": {
+      "QLIKE": 0.9049295200712474,
+      "RMSE_log": 0.957771104538177,
+      "IC": 0.7342969714158459,
+      "DM_vs_HAR_p": 0.9996832446295567
+    },
+    "GARCH": {
+      "QLIKE": 1.0770821823617882,
+      "RMSE_log": 1.1180912892989239,
+      "IC": 0.6356963024929132,
+      "DM_vs_HAR_p": 0.9721550766310401
+    },
+    "HAR": {
+      "QLIKE": 0.8192940234506932,
+      "RMSE_log": 0.925380827782433,
+      "IC": 0.7766995277941854,
+      "DM_vs_HAR_p": null
+    },
+    "Meridian": {
+      "QLIKE": 0.8578560029226717,
+      "RMSE_log": 0.9189654773154361,
+      "IC": 0.7791230970500418,
+      "DM_vs_HAR_p": 0.8387415216598711
+    },
+    "TimeMixer": {
+      "QLIKE": 1.512959324908112,
+      "RMSE_log": 0.8515556756384687,
+      "IC": 0.7531480334690325,
+      "DM_vs_HAR_p": 0.9253138406099685
+    }
+  },
+  "mcs_90_included": [
+    "GARCH",
+    "HAR",
+    "Meridian",
+    "TimeMixer"
+  ],
+  "mcs_pvalues": {
+    "EWMA": 0.019,
+    "GARCH": 0.144,
+    "HAR": 1.0,
+    "Meridian": 0.335,
+    "TimeMixer": 0.144
+  }
+}

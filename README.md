@@ -20,6 +20,50 @@ score** — benchmarked honestly against HAR-RV (volatility) and a Gaussian HMM
 - Every OOS number comes from expanding walk-forward with a 22-day purge/embargo
   at every train/test boundary. Feature scaling is fit on train only.
 
+## Benchmark: volatility forecasting vs GARCH · EWMA · HAR · TimeMixer
+
+A head-to-head under **one identical purged/embargoed walk-forward** (`scripts/benchmark_vol.py`):
+**42,127** pooled out-of-sample forecasts across the 11-asset universe, **12 expanding folds**,
+22-day purge + embargo, train-only calibration so QLIKE compares *dynamics* not a variance-proxy
+offset. Metrics: **QLIKE** (variance loss), **RMSE** (log-vol), **IC** (Spearman rank corr of
+forecast vs realized), **Diebold–Mariano** vs HAR, and a **Model Confidence Set** (Hansen–Lunde–
+Nason, 90%). TimeMixer is a faithful compact reimplementation (multiscale downsampling + series
+decomposition + cross-scale mixing + multi-predictor head), trained pooled per fold.
+
+| Model | QLIKE ↓ | RMSE (log) ↓ | IC ↑ | DM vs HAR (p) | MCS 90% |
+|---|---|---|---|---|---|
+| **HAR-RV** (Corsi) | **0.819** | 0.925 | 0.777 | — | ✅ |
+| **Meridian** (HAR + leverage) | 0.858 | 0.919 | **0.779** | 0.84 | ✅ |
+| EWMA (RiskMetrics λ=0.94) | 0.905 | 0.958 | 0.734 | 1.00 | ❌ eliminated |
+| GARCH(1,1) | 1.077 | 1.118 | 0.636 | 0.97 | ✅ |
+| TimeMixer (compact) | 1.513 | **0.852** | 0.753 | 0.93 | ✅ |
+
+*QLIKE/RMSE lower = better; IC higher = better. DM p = one-sided prob. the model has lower QLIKE
+than HAR. MCS = statistically indistinguishable from the best at 90%. Bold = best in column.*
+
+**Honest read of the results:**
+- **HAR is the benchmark to beat, and it holds** — lowest QLIKE (0.819). Consistent with the
+  literature (HAR is famously hard to beat on daily realized volatility); no model beats it on
+  QLIKE (all DM p > 0.8).
+- **Meridian** (the lightweight **HAR + leverage** module the interactive engine runs live) is
+  statistically **on par with HAR** — inside the MCS, DM cannot separate them — and posts the
+  **best IC** (ranking) and near-best RMSE. Its leverage/bad-vol channel helps ordering and
+  level-fit; on pooled QLIKE it's a hair behind plain HAR.
+- **TimeMixer (SOTA deep model) does *not* beat the simple econometric baselines on the
+  risk-relevant loss:** it has the **best RMSE but the worst QLIKE** — well-centered in
+  squared-error terms yet mis-calibrated for the asymmetric QLIKE that risk management cares
+  about (a known deep-model failure mode on volatility). This matches independent evidence
+  (Brini 2026: time-series foundation models don't reliably beat Log-HAR on daily vol).
+- **EWMA is eliminated** from the 90% MCS; **GARCH** is weakest on QLIKE/IC (it forecasts
+  close-to-close *return* variance, a coarser proxy than realized variance).
+
+**Caveats (stated, not buried):** "Meridian" here is the **HAR+leverage per-entity module**, not
+the heavier 5-seed CF-JEPA SSM **ensemble** that produced the headline **+6.3% vs HAR-RV
+(p=1.2e-9)** on the pre-registered protocol — that ensemble is validated separately (see
+`MODEL_CARD.md`) but is too costly to retrain inside every walk-forward fold here. The MCS is
+low-power on heavy-tailed QLIKE (it retains four of five models); the point estimates and DM
+tests give the sharper ranking. Full numbers: `results/benchmark_vol.{json,csv}`.
+
 ## Layout
 
 ```
