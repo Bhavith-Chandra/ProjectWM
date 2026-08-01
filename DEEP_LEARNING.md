@@ -90,8 +90,9 @@ spikes. The pre-registered regime-vs-HMM claim remains unmet by every learned de
 The neural core is the substrate for genuine world-model research. Status of the ranked items:
 1. ~~**EB-JEPA learned energy**~~ — **TESTED, REJECTED** (see above): the learned contrastive energy is
    worse than L2 for surprise; discrimination ≠ surprise.
-2. **Multi-timescale / hierarchical JEPA (H-JEPA)** — daily/weekly/monthly latent predictors — untested;
-   lower priority given the horizon-edge decay already measured (`horizon_iv_edge.py`).
+2. ~~**Multi-timescale / hierarchical JEPA (H-JEPA)**~~ — **TESTED, REJECTED** (`ab_hjepa.py`):
+   multi-scale energy 2.25× vs single-scale 2.67× vol lift. Aggregating horizons raises broad
+   correlation but blunts the sharp spike that makes a surprise signal useful. Single-scale wins.
 3. ~~**Energy-as-regime trigger vs HMM**~~ — **TESTED, NOT MET** (see above): the energy is spiky, not
    sticky; it does not beat the HMM as a persistent regime label.
 4. **Latent-space world-model calibration** — the emission-side tail experiment (`WORLDMODEL_CORE.md`) —
