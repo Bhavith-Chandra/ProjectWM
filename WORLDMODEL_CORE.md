@@ -50,17 +50,19 @@ A world model earns the name by reproducing the world's behavior, not by point-f
 | Test | Result (shipped checkpoint `results/worldmodel.pt`, measured **multi-path**) | Verdict |
 |---|---|---|
 | **Stylized facts** (Cont 2001): fat tails, vol clustering, leverage | learned — free-run (8-path median, temp 1.0) kurtosis **7.9** vs real 13.3 (full history) / 4.5 (calm test split); ACF\|r\| 0.32 vs real 0.30; leverage sign correct — decisively beats i.i.d.-Gaussian (ACF ~0, kurtosis ~0) | ✅ learned dynamics, well-matched |
-| **Free-run stability** (`world_stabilize.py`) | temperature sweep: kurtosis 7.9→5.3 as temp 1.0→0.5, but clustering ALSO falls (ACF 0.32→0.25) — **temp 1.0 is optimal**; the earlier "kurtosis 26" was a **single-path artifact**, gone under multi-path median | ✅ stable in aggregate (average paths) |
+| **Free-run stability** (`world_stabilize.py`, two-directional sweep) | tradeoff: kurtosis best-matched at temp ~1.4 (11.4 vs real 13.3), clustering best-matched at temp ~0.8-1.0 (ACF 0.28-0.32 vs 0.30) — **no single temp matches both**; the model is *under*-dispersed at temp 1.0. Temp 1.6 is unstable (per-path kurtosis to ~20). The earlier "kurtosis 26" was a **single-path artifact** | ✅ operating range temp **0.8–1.4** (default 1.0) |
 | **1-day joint VaR** (`world_calib_validate.py`, OOS) | equal-weight in-universe book: breach **1.6%**, Kupiec **p=0.21 (passes)** recently; ~3.1% over the full 2008-2020 stress test. A hybrid EWMA-marginal rescale was tested and **rejected** (2.2%, worse). | ✅ Kupiec-calibrated recently, regime-dependent |
 | **What-if** (structural `u_t` shock) | coherent flight-to-quality: equities −1 to −4 bps, TLT/IEF/LQD **+**, over 5 days | ✅ economically sensible |
 
 **Honest bottom line:** the model **learned market dynamics** (multi-path free-run kurtosis 7.9 and
 ACF\|r\| 0.32 both sit right against the real 13.3 / 0.30, vs a flat i.i.d. baseline) and produces
 **coherent structural what-ifs**. Its 1-day joint VaR is **Kupiec-calibrated over recent data (1.6%)**,
-looser over deep-stress history (~3.1%). Two premises I had to correct with proper measurement: the
+looser over deep-stress history (~3.1%). Three premises corrected with proper measurement: the
 "kurtosis-26 instability" was a **single-path artifact** (multi-path median 7.9 — averaging, which the
-wired scenario does with 3,000 paths, resolves it), and lowering the rollout temperature to "stabilize"
-would have **degraded** the model (clustering falls faster than kurtosis). So its wired role
+wired scenario does with 3,000 paths, resolves it); an earlier one-directional sweep wrongly concluded
+"temp 1.0 is optimal" — sweeping **both** directions shows the model is *under*-dispersed at 1.0 and
+~1.4 better matches real tails (tradeoff: clustering overshoots by then), so the honest operating range
+is temp **0.8–1.4**; and lowering the temperature to "stabilize" would have **degraded** the model. So its wired role
 (`analyze.world_portfolio_scenario`, `ask.py --portfolio`) is a **coherent joint cross-asset scenario +
 what-ifs** that is reasonably calibrated in aggregate; for the single-book calibrated tail across all
 regimes the EVT-GPD is still tighter. The honest usable horizon is short (days); that boundary is stated
