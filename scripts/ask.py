@@ -1,10 +1,11 @@
 """Meridian Enterprise World Model — interactive CLI.
 
-    python3 scripts/ask.py "Apple"
-    python3 scripts/ask.py "bitcoin"
+    python3 scripts/ask.py "Apple"                         # quick read
+    python3 scripts/ask.py --full "Apple"                  # full thesis + Monte-Carlo + news
     python3 scripts/ask.py "Apple vs Tesla"                # comparison
     python3 scripts/ask.py --scenario "Apple" -0.05        # what-if: market -5%
-    python3 scripts/ask.py "Nifty 50"
+    python3 scripts/ask.py --world SPY -0.05 "Tesla"       # multi-entity shock propagation
+    python3 scripts/ask.py --portfolio SPY TLT GLD NVDA    # min-variance basket
 
 Resolves ANY entity, fetches its data live, runs the module bank, and explains.
 With no argument, runs a short demo across several asset classes.
@@ -34,6 +35,17 @@ def market_series():
 def main():
     mkt = market_series()
     args = sys.argv[1:]
+    if args and args[0] == "--full":
+        from meridian.analyze import full_analysis
+        r = full_analysis(" ".join(args[1:]), with_news=True)
+        if not r["ok"]:
+            print(r["message"]); return
+        print(r["thesis"])
+        if r.get("news"):
+            print("\n**Recent news (context only — not a market call):**")
+            for h in r["news"][:5]:
+                print(f"  • {h['title'][:90]}")
+        return
     if args and args[0] == "--scenario":
         entity = args[1]; shock = float(args[2])
         print(scenario(entity, shock, market=mkt))

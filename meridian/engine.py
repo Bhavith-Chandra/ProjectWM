@@ -109,6 +109,7 @@ class Analysis:
     beta_mkt: float
     corr_mkt: float
     data_quality_ok: bool = True
+    forecast_model: str = "HAR-lev"   # "HAR-lev+IV" when a matched implied-vol index augments it
     notes: list = field(default_factory=list)
 
 
@@ -152,6 +153,66 @@ def _har_forecast(rv: pd.Series, ret: pd.Series | None = None):
         raw = np.exp(beta @ np.array(row + ([lev] if use_lev else [])) + jb)
         rvf = min(raw, cap); capped = capped or raw >= cap
         fcs.append(rvf); hist.append(rvf)
+    return (float(np.sqrt(rv1 * TRADING_DAYS)),
+            float(np.sqrt(np.mean(fcs) * TRADING_DAYS)), bool(capped))
+
+
+def _iv_augmented_forecast(symbol: str, rv: pd.Series, ret: pd.Series):
+    """HAR-lev augmented with the MATCHED implied-vol family — the +10.3%-over-HAR lever
+    (scripts/benchmark_exog.py, DM p<0.001; deep-research pass w084stjkn, all claims CONFIRMED).
+
+    Only fires when a matched free implied-vol index exists for the symbol (SPY→VIX, QQQ→VXN,
+    IWM→RVX, DIA→VXD, USO→OVX, GLD→GVZ, EEM→VXEEM, + the shared VIX term structure). For any
+    other entity (e.g. a single stock, which has no free per-asset implied vol) this returns
+    None and the caller falls back to the price-only HAR forecast — the honest documented boundary.
+
+    Returns (vol_1d_ann, vol_5d_ann, capped) or None.
+    """
+    try:
+        from meridian import exog
+        if symbol not in exog.MATCH:               # TRUE matched index only (not the generic-VIX
+            return None                            # fallback) — the +10.3% was measured only here
+        m = exog.matched_index(symbol)
+        iv = exog.load_iv()
+        if m not in iv:
+            return None
+        ex = exog.exog_features(symbol, rv.index, rv=rv, iv=iv, macro={})
+    except Exception:
+        return None
+    have = [c for c in ["iv", "iv_chg", "ts_short", "ts_long", "vrp"] if c in ex.columns]
+    if "iv" not in have:
+        return None
+    hi = float(np.nanquantile(rv, 0.995)); rv = rv.clip(upper=hi)
+    lrv = np.log(rv + EPS); har = har_features(rv)
+    neg = (ret.reindex(rv.index).clip(upper=0) ** 2)
+    base_cols = {"d": np.log(har["rv_d"] + EPS), "w": np.log(har["rv_w"] + EPS),
+                 "m": np.log(har["rv_m"] + EPS), "lev": np.log(neg + EPS)}
+    X = pd.DataFrame(base_cols, index=rv.index)
+    for c in have:
+        X[c] = ex[c].reindex(rv.index)
+    y = lrv.shift(-1)
+    D = pd.concat([X, y.rename("y")], axis=1).dropna()
+    if len(D) < 400:                               # not enough overlap with IV history
+        return None
+    A = np.column_stack([np.ones(len(D)), D[X.columns].to_numpy()])
+    beta, *_ = np.linalg.lstsq(A, D["y"].to_numpy(), rcond=None)
+    jb = 0.5 * np.var(D["y"].to_numpy() - A @ beta)
+    cap = float(np.nanmax(rv.iloc[-252:])) * 3.0
+    last = ex.iloc[-1]
+    row = [1.0, np.log(rv.iloc[-1] + EPS), np.log(rv.iloc[-5:].mean() + EPS),
+           np.log(rv.iloc[-22:].mean() + EPS), np.log(neg.iloc[-1] + EPS)]
+    row += [float(last[c]) for c in have]
+    if not np.all(np.isfinite(row)):
+        return None
+    rv1 = min(float(np.exp(beta @ np.array(row) + jb)), cap)
+    # 5-day: hold the exogenous (IV/term-structure) block at its latest value, iterate the HAR block
+    hist = list(rv.iloc[-22:].to_numpy()); fcs = []; capped = rv1 >= cap * 0.999
+    exog_tail = [float(last[c]) for c in have]; lev_last = np.log(neg.iloc[-1] + EPS)
+    for _ in range(5):
+        r_ = [1.0, np.log(hist[-1] + EPS), np.log(np.mean(hist[-5:]) + EPS),
+              np.log(np.mean(hist[-22:]) + EPS), lev_last] + exog_tail
+        raw = float(np.exp(beta @ np.array(r_) + jb)); rvf = min(raw, cap)
+        capped = capped or raw >= cap; fcs.append(rvf); hist.append(rvf)
     return (float(np.sqrt(rv1 * TRADING_DAYS)),
             float(np.sqrt(np.mean(fcs) * TRADING_DAYS)), bool(capped))
 
@@ -224,7 +285,12 @@ def analyze(query: str, market: pd.Series | None = None) -> Analysis | dict:
     rvf = realized_variance(ohlc); rv = rvf["rv"].dropna(); ret = rvf["ret"].dropna()
     px = ohlc["adjclose"]
     vol_now = float(np.sqrt(rv.iloc[-22:].mean() * TRADING_DAYS))
-    vol1, vol5, capped = _har_forecast(rv, ret)
+    fmodel = "HAR-lev"
+    iv_fc = _iv_augmented_forecast(r["symbol"], rv, ret)   # +10.3% lever when matched IV exists
+    if iv_fc is not None:
+        vol1, vol5, capped = iv_fc; fmodel = "HAR-lev+IV"
+    else:
+        vol1, vol5, capped = _har_forecast(rv, ret)
     # data-quality flag: capped forecast or many extreme daily jumps ⇒ likely rolled futures / bad ticks
     gap_frac = float((ret.abs() > 0.25).mean())
     dq = capped or gap_frac > 0.005
@@ -242,6 +308,7 @@ def analyze(query: str, market: pd.Series | None = None) -> Analysis | dict:
         vol_now_ann=vol_now, vol_fc_1d_ann=vol1, vol_fc_5d_ann=vol5, vol_pct=pct,
         regime=regime, regime_note=rnote, ret_1m=ret_1m, ret_12m=ret_12m, drawdown=dd,
         var99=var99, es99=es99, beta_mkt=beta, corr_mkt=corr, data_quality_ok=not dq,
+        forecast_model=fmodel,
     )
 
 

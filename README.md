@@ -168,6 +168,7 @@ pip install statsmodels arch scikit-learn torch openpyxl   # rest inherited from
 
 # ask about any entity (routes to the right modules, explains):
 python scripts/ask.py "Apple"
+python scripts/ask.py --full "SPY"                  # full thesis: forecast + Monte-Carlo + tail + news
 python scripts/ask.py "SPY vs gold"
 python scripts/ask.py --world SPY -0.05 "Tesla"     # what-if a market shock
 python scripts/ask.py --portfolio SPY TLT GLD NVDA  # min-variance basket
@@ -180,6 +181,43 @@ python scripts/frontier_intraday.py                 # Regime-Meridian champion
 python scripts/risk_benchmark.py                    # portfolio + tail risk
 python scripts/compile_comparison.py                # -> COMPARISON.md
 ```
+
+## Connecting your own data
+
+Meridian is built to plug into **any** data source with a tiny adapter — a source is just a callable
+that returns a tidy DataFrame/Series. Register once; every module can use it (`meridian/connect.py`).
+
+```python
+from meridian import connect
+from meridian.analyze import full_analysis, portfolio_analysis
+
+conn = connect.Connection()
+conn.prices("AAPL")                 # any global symbol (equity/ETF/FX/crypto/futures/index) via Yahoo
+conn.macro("BAMLH0A0HYM2")          # any FRED series (rates, credit spreads, conditions indices)
+conn.upload("my_prices.csv")        # YOUR data — trusted as-is, never altered or invented
+conn.news("Apple stock")            # recent headlines for CONTEXT (honest: not a market prediction)
+
+# plug in a private vendor / broker feed in ~5 lines:
+connect.register("mybroker", lambda sym: my_client.history(sym))
+connect.get("mybroker")("AAPL")
+
+# one call → the full stack (forecast + regime + tail VaR/ES + Monte-Carlo + generated thesis):
+full_analysis("SPY", with_news=False)
+portfolio_analysis(["SPY", "TLT", "GLD", "QQQ"])     # Ledoit-Wolf min-variance basket
+```
+
+**What one `full_analysis` call gives you** (every number from a calibrated, no-lookahead module):
+volatility forecast (implied-vol-augmented where a matched free vol index exists — the +10.3% model),
+regime, 1-day tail VaR/ES, a 10k-path Monte-Carlo (filtered historical simulation) horizon
+distribution, market beta, and a readable **thesis**. Multi-asset joint scenarios and structural
+what-ifs come from the world-model core (`meridian/worldmodel.py`, [`WORLDMODEL_CORE.md`](WORLDMODEL_CORE.md)).
+
+**Honesty rails (by design, not disclaimer):** uploaded/vendor data is used exactly as given; the news
+hook surfaces context and never fabricates a market call; the forecast thesis states *which* model ran
+and where the free implied-vol lever is **not** available (single stocks / crypto). It quantifies risk;
+it does not claim to predict the market, and it does not claim to beat proprietary-data or
+latency-driven firm models — those are different games (private data, capital, microseconds), and any
+such claim would be fabrication.
 
 ## Provenance & relationship to prior work
 

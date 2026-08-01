@@ -18,7 +18,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from meridian.data import fetch_yahoo, fetch_fred
+from meridian.data import fetch_yahoo, fetch_fred, DATA_DIR
 
 EPS = 1e-12
 
@@ -48,13 +48,41 @@ def load_iv(refresh: bool = False) -> dict[str, pd.Series]:
 
 
 def load_macro_exog() -> dict[str, pd.Series]:
+    """Credit/conditions from FRED. Fail-FAST and skip if unreachable — the research (pass
+    w084stjkn) confirms these are the MARGINAL, stress-only lever, so they must never block the
+    pipeline. Cached to data/fred_*.csv on first success; the IV family (the main lever) is
+    Yahoo-only and independent of this."""
     out = {}
     for name, sid in FRED_EXOG.items():
+        cached = (DATA_DIR / f"fred_{sid}.csv").exists()
         try:
-            out[name] = fetch_fred(sid).rename(name)
+            if cached:
+                s = fetch_fred(sid)                        # instant from local CSV
+            else:
+                s = _fred_quick(sid)                       # one bounded attempt; None if blocked
+            if s is not None and len(s):
+                out[name] = s.rename(name)
         except Exception:
-            pass
+            pass                                           # skip cleanly; edge is stress-only anyway
     return out
+
+
+def _fred_quick(sid: str, timeout: int = 10):
+    """One short FRED fetch (no long retry loop). Caches on success; returns None if unreachable."""
+    import io
+    import subprocess
+    url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}"
+    try:
+        out = subprocess.run(["curl", "-sS", "--http1.1", "-m", str(timeout),
+                              "-A", "Mozilla/5.0", url], capture_output=True, timeout=timeout + 3)
+        if out.returncode != 0 or not out.stdout:
+            return None
+        (DATA_DIR / f"fred_{sid}.csv").write_bytes(out.stdout)
+        df = pd.read_csv(io.StringIO(out.stdout.decode()))
+        df[df.columns[0]] = pd.to_datetime(df[df.columns[0]], errors="coerce")
+        return pd.to_numeric(df.set_index(df.columns[0])[sid], errors="coerce").dropna()
+    except Exception:
+        return None
 
 
 def matched_index(asset: str) -> str:

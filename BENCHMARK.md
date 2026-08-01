@@ -101,6 +101,28 @@ held-out (24 assets) and international-index (17) universes — precisely the *p
 available, **HAR-IV** (HAR + VIX) is the consistently strong addition (best or near-best here and on
 the held-out set, DM p<0.001 OOS).
 
+### 3d. The matched implied-vol family — the biggest free-data lever (7 index ETFs, 23,496 OOS forecasts)
+*SPY→VIX, QQQ→VXN, IWM→RVX, DIA→VXD, USO→OVX, GLD→GVZ, EEM→VXEEM — each asset gets **its own**
+implied-vol index, plus the shared VIX term structure (^VIX9D/^VIX/^VIX3M) and a variance-risk-premium
+proxy. Purged walk-forward, QLIKE, Diebold-Mariano vs HAR and vs price-only Meridian. `scripts/benchmark_exog.py`.*
+
+| Model | QLIKE ↓ | vs HAR | IC ↑ | DM vs HAR | DM vs Meridian |
+|---|---|---|---|---|---|
+| HAR | 0.3488 | +0.00% | 0.772 | — | — |
+| Meridian (price-only) | 0.3438 | +1.44% | 0.775 | 0.000 | — |
+| **Meridian + matched IV** | 0.3221 | **+7.64%** | 0.783 | 0.000 | **0.000 ★** |
+| **Meridian + IV + term-structure + VRP** | **0.3129** | **+10.30%** | **0.789** | 0.000 | **0.000 ★** |
+
+**Read:** feeding each asset its **matched** implied-vol index (not the generic S&P VIX) and the VIX
+**term structure** lifts the edge to **+10.3% over HAR** — **7× the price-only model's +1.44%** — and
+DM-significantly beats price-only Meridian (p<0.001). This is on **free Yahoo data alone** (no FRED
+needed). It's the single largest honest lever found, and it's now **wired live**: `engine.analyze`
+routes any asset with a matched free vol index to this forecaster (`forecast_model="HAR-lev+IV"`),
+and falls back to price-only HAR for single stocks / crypto that have **no free per-asset implied vol**
+— the honest boundary, surfaced in every thesis. Independently corroborated by deep-research pass
+`w084stjkn` (25 agents, all key claims CONFIRMED against primary sources: Kambouroudis-McMillan-Tsakou
+2021, Busch-Christensen-Nielsen 2011). See `RESEARCH.md` §Free-data edge.
+
 ## 4. The honest decomposition — where the edge is, and isn't
 
 - **It's the features — and they help where theory says they should.** `HAR-full` (linear, all

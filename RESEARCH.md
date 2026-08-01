@@ -238,3 +238,43 @@ This is precisely why **futures carry/trend** is the evidence-backed path: same 
 data, but low-turnover and ~10× cheaper to trade, so the premium survives costs. Intraday
 RV is also now buildable (proper realized variance) for a cleaner vol target — a real
 upgrade for the vol module when a longer intraday history is available.
+
+---
+
+## Free-data edge — what genuinely improves daily vol forecasting (deep-research pass `w084stjkn`)
+
+*25-agent adversarial deep-research + fact-check; every headline claim below was verified CONFIRMED
+against the primary source. Question: which FREE data (implied-vol family, term structure, macro/credit,
+positioning) genuinely improves daily RV forecasting OOS, and by how much.*
+
+**Bottom line:** the honest achievable ceiling with ALL free data is ~**8–10% over HAR at the 1-day
+horizon** (larger at weekly/monthly). No credible replicated study doubles a *daily* edge by stacking
+exogenous series into a linear model; the residual gain beyond IV comes from nonlinearity + horizon,
+not more features. Ranked levers:
+
+1. **Matched implied-vol index family — the #1 lever (built, +10.3%).** Kambouroudis-McMillan-Tsakou
+   (2021, *J. Futures Markets*): HAR + each index's *own* implied vol cuts OOS QLIKE 9–27% across 10
+   international indices, the *only* family surviving the Model Confidence Set. Replicates
+   Busch-Christensen-Nielsen (2011). **Caveat (honest):** those are QLIKE reductions on a scale that
+   weights calm days heavily — do not read as a same-size RMSE gain; and once you already ingest a VIX,
+   the incremental move is **matched-per-target breadth** (QQQ→VXN, USO→OVX, GLD→GVZ…), which is exactly
+   what we built (`meridian/exog.py`, live in `engine.analyze`).
+2. **VIX term structure — modest, real (built).** A single VIX *level* can't carry slope/vol-of-vol;
+   ^VIX9D/^VIX/^VIX3M ratios + ^VVIX/^SKEW add **low-single-digit** lift concentrated in stress
+   transitions. Included in the +10.3%.
+3. **Credit / funding spreads (FRED) — marginal, stress-only.** Christiansen-Schmeling-Schrimpf (2012):
+   credit-risk & funding-liquidity proxies (HY-OAS `BAMLH0A0HYM2`, NFCI) are the *most robust* macro
+   OOS predictors, but only OOS R² ≈ 0.00–0.08 vs AR(1) **monthly**, model-selection fragile, and the
+   gain **concentrates at recession onsets** (Paye 2012: little unconditional OOS macro gain). Wired in
+   as an *optional, fail-fast* block (`load_macro_exog`) that never blocks the pipeline — it earns a
+   test, not a headline.
+4. **Variance risk premium — skip as an engineered feature.** VRP predicts *returns* at the *quarterly*
+   horizon (Bollerslev-Tauchen-Zhou 2009), not next-day RV; and it's a linear combination of IV and RV,
+   both already in the model. (The 2014 "OOS" R² claims were downgraded to in-sample on verification.)
+5. **Sentiment / positioning (put/call, AAII, COT) — skip.** No robust evidence it beats HAR OOS for RV
+   once VIX is in.
+
+**Design consequence, honestly stated:** the matched-IV family is a genuine, replicated, buildable
+~7–10% lever on the index ETFs that *have* a free vol index. It is **not available for single stocks**
+(no free per-asset implied vol), so those honestly stay on price-only HAR — the boundary the engine
+surfaces in every thesis rather than papering over with a generic VIX.
