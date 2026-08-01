@@ -118,6 +118,67 @@ def regime_propagate(returns: pd.DataFrame, source: str, shock: float, threshold
     return pd.Series(resp, index=names), ("stress" if stressed else "calm")
 
 
+def crisis_calm_cov(returns: pd.DataFrame, crisis_windows: list[tuple[str, str]],
+                    shrink: float = 0.15) -> tuple[np.ndarray, np.ndarray]:
+    """Pooled CRISIS covariance (union of the given date windows) and CALM covariance (everything else).
+    Both Ledoit-style shrunk toward the pooled full-sample cov for conditioning. Grounds the crisis
+    footprint in ACTUAL stress blocks (2008/2020/2022), per the review's 'historical stress grounding'."""
+    idx = returns.index
+    mask = pd.Series(False, index=idx)
+    for a, b in crisis_windows:
+        mask |= (idx >= pd.Timestamp(a)) & (idx <= pd.Timestamp(b))
+    Rc, Rk = returns[mask.values], returns[~mask.values]
+    Sig_all = np.cov(returns.to_numpy(), rowvar=False)
+    def _cov(R):
+        if len(R) <= R.shape[1] + 2:
+            return Sig_all
+        S = np.cov(R.to_numpy(), rowvar=False)
+        return (1 - shrink) * S + shrink * Sig_all
+    return _cov(Rk), _cov(Rc)                                  # (calm_cov, crisis_cov)
+
+
+class ThresholdShockNetwork:
+    """Non-linear, regime-conditional shock propagation (external review #3, historical-grounding form).
+
+    Keeps the linear generalized-IRF as the CALM baseline and switches to a CRISIS covariance when the
+    impulse crosses a downside `stress_threshold`, so cross-asset betas gap up under stress. At impact
+    the response of asset i to a shock in the source is beta_i = Cov_i,src / Cov_src,src, scaled by the
+    shock — the Pesaran-Shin generalized impact, evaluated on the regime-appropriate covariance.
+
+    VALIDATION OUTCOME (scripts/validate_network.py, leave-one-crisis-out, chronological):
+      * Point co-move PROPAGATION: the crisis matrix did NOT beat linear GIRF out-of-sample on the
+        held-out COVID-2020 / 2022 crises (−0.7% / −1.1% RMSE, one-sided DM p=0.90 / 0.99).
+      * Portfolio stress-VaR: the full-sample covariance DOES badly under-cover a portfolio in a severe
+        crisis (25.6% breach in COVID vs a 1% target), and the crisis covariance fixes it (7.7%) — BUT
+        the decomposition shows this is ENTIRELY a crisis-VOLATILITY effect, not the correlation gap:
+        crisis-correlations-with-calm-vols barely moves coverage (25.6% → 23.1%). The review's specific
+        "correlations gap to 1.0" mechanism is real as a stylized fact but is NOT where risk is
+        under-estimated; the volatility LEVEL is — and that is already handled by the dynamic vol
+        forecast (HAR-lev+IV) and the IV term-structure early-warning gate (exog.term_structure_warning).
+    CONSEQUENCE: this class is retained as a DIAGNOSTIC / scenario tool, not a validated default upgrade.
+    `propagate` (linear GIRF) remains the propagation default. Do not present its magnitudes as more
+    accurate — the honest lever for crisis risk is dynamic volatility, which the model already applies."""
+
+    def __init__(self, asset_names: list, calm_cov: np.ndarray, crisis_cov: np.ndarray,
+                 stress_threshold: float = -0.03):
+        self.asset_names = list(asset_names)
+        self.calm_cov = np.asarray(calm_cov)
+        self.crisis_cov = np.asarray(crisis_cov)
+        self.stress_threshold = stress_threshold
+
+    def propagate_shock(self, target_asset: str, magnitude: float) -> dict:
+        if target_asset not in self.asset_names:
+            raise ValueError(f"Asset '{target_asset}' missing from network universe.")
+        idx = self.asset_names.index(target_asset)
+        cov = self.crisis_cov if magnitude <= self.stress_threshold else self.calm_cov
+        sigma_ii = cov[idx, idx] + EPS
+        impact = cov[:, idx] / sigma_ii * magnitude            # beta_i * shock (generalized impact)
+        return {self.asset_names[i]: float(impact[i]) for i in range(len(self.asset_names))}
+
+    def regime_of(self, magnitude: float) -> str:
+        return "crisis" if magnitude <= self.stress_threshold else "calm"
+
+
 def connectedness(returns: pd.DataFrame, lag: int = 2, H: int = 10):
     """Generalized-FEVD net transmitter/receiver table (%) — the connectedness object."""
     res = fit_var(returns, lag)
