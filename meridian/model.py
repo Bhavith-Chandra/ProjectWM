@@ -131,16 +131,20 @@ class EnergyHead(nn.Module):
     def energy(self, zp, zt):
         return self.net(self.pair_features(zp, zt)).squeeze(-1)   # per-pair scalar energy
 
-    def contrastive(self, zp, zt):
-        """In-batch contrastive energy: E(zp_i, zt_j) for all j; the positive is j=i.
-        Returns (loss, per_sample_energy) where per_sample_energy = E(zp_i, zt_i) (the surprise)."""
+    def contrastive(self, zp, zt, n_neg: int = 63):
+        """In-batch contrastive energy with CAPPED negatives (O(B·K), not O(B²)): each anchor i scores
+        its true future zt_i (positive) against `n_neg` other in-batch futures (negatives). The positive
+        must have the lowest energy. Returns (loss, per_sample_energy) — energy=E(zp_i,zt_i) = surprise."""
         B = zp.shape[0]
-        zp_e = zp.unsqueeze(1).expand(B, B, -1)                   # [B,B,d]
-        zt_e = zt.unsqueeze(0).expand(B, B, -1)
-        E = self.net(self.pair_features(zp_e, zt_e)).squeeze(-1)  # [B,B] energy of every pair
-        # cross-entropy: the true future (diagonal) should have the LOWEST energy in its row
-        loss = F.cross_entropy(-E, torch.arange(B, device=zp.device))
-        return loss, E.diagonal()
+        k = min(n_neg, B - 1)
+        # for each anchor, sample k distinct negative indices (shift trick keeps them off-diagonal)
+        offs = (torch.randint(1, B, (B, k), device=zp.device) + torch.arange(B, device=zp.device)[:, None]) % B
+        cols = torch.cat([torch.arange(B, device=zp.device)[:, None], offs], dim=1)   # [B, k+1]; col0=positive
+        zp_e = zp.unsqueeze(1).expand(B, k + 1, -1)              # [B,k+1,d]
+        zt_e = zt[cols]                                          # [B,k+1,d]
+        E = self.net(self.pair_features(zp_e, zt_e)).squeeze(-1)  # [B,k+1] energies
+        loss = F.cross_entropy(-E, torch.zeros(B, dtype=torch.long, device=zp.device))  # positive is col 0
+        return loss, E[:, 0]                                     # diagonal energy = per-sample surprise
 
 
 # --------------------------------------------------------------------------- #
