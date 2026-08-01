@@ -122,6 +122,25 @@ def matched_index(asset: str) -> str:
     return MATCH.get(asset, "VIX")
 
 
+def credit_stress_flag(macro: dict | None = None) -> dict:
+    """SECONDARY stress-confirmation from credit spreads (HY-OAS). NOT a forecast input — research
+    (RESEARCH.md, pass w084stjkn) shows credit spreads are marginal and stress-only for daily vol, so
+    this is a confirming context flag only. Fires when HY-OAS sits in the top quintile of its trailing
+    year. Requires FRED (BAMLH0A0HYM2); returns available=False when FRED is unreachable (common) — it
+    NEVER fabricates a value. Unvalidated as a live signal precisely because the data isn't fetchable
+    here; wired and ready for when a credit feed is connected."""
+    macro = macro if macro is not None else load_macro_exog()
+    s = macro.get("hy_oas")
+    if s is None or not len(s):
+        return {"available": False}
+    s = s.dropna()
+    if len(s) < 60:
+        return {"available": False}
+    level = float(s.iloc[-1]); pct = float((s.tail(252) <= level).mean())
+    return {"available": True, "elevated": pct >= 0.80, "oas_pct_1y": round(pct, 2),
+            "oas_level": round(level, 2), "as_of": str(s.index[-1].date())}
+
+
 def exog_features(asset: str, dates: pd.DatetimeIndex, rv: pd.Series | None = None,
                   iv: dict | None = None, macro: dict | None = None) -> pd.DataFrame:
     """Build the exogenous feature block for `asset` aligned to `dates` (all causal).
