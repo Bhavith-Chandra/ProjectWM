@@ -34,9 +34,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 warnings.filterwarnings("ignore")
 from meridian.data import load_all
 from meridian.features import realized_variance
-from meridian.evalproto import qlike, diebold_mariano
+from meridian.evalproto import qlike, diebold_mariano, mz_r2
 
+import os
 EPS = 1e-12
+H = int(os.environ.get("MERIDIAN_H", "1"))   # forecast horizon (days); target = forward H-day mean RV
 L = 40                       # input window for TimeMixer
 MIN_TRAIN_D = 1260           # ~5y initial train (calendar days of data)
 TEST_D = 378                 # ~1.5y test block
@@ -71,12 +73,14 @@ def build(prices=None, macro=None):
         m = pd.Series(lrv).rolling(22).mean().to_numpy()
         r5 = pd.Series(ret).rolling(5).sum().to_numpy()
         vx = vix.reindex(dates).ffill().to_numpy()
+        fwd = pd.Series(rv).rolling(H).mean().shift(-H).to_numpy()   # mean RV over t+1..t+H
+        fwd_l = np.log(fwd + EPS)
         for t in range(L, len(rv) - 1):
-            if not np.isfinite([lrv[t], w[t], m[t], neg[t], pos[t], lrv[t + 1]]).all():
+            if not np.isfinite([lrv[t], w[t], m[t], neg[t], pos[t], fwd_l[t]]).all():
                 continue
             vt = vx[t] if np.isfinite(vx[t]) else np.log(15.0)   # VIX fallback
             r5t = r5[t] if np.isfinite(r5[t]) else 0.0
-            rows.append((a, dates[t], rv[t], lrv[t + 1], lrv[t], w[t], m[t], neg[t], pos[t], vt, r5t, rv[t + 1]))
+            rows.append((a, dates[t], rv[t], fwd_l[t], lrv[t], w[t], m[t], neg[t], pos[t], vt, r5t, fwd[t]))
             WlogA.append(lrv[t - L + 1:t + 1]); WlevA.append(neg[t - L + 1:t + 1])
     R = pd.DataFrame(rows, columns=["asset", "date", "rv", "y", "har_d", "har_w", "har_m",
                                     "lev", "pos", "vix", "ret5", "rv_next"])
@@ -143,11 +147,13 @@ def build_omi():
         w = pd.Series(lrv).rolling(5).mean().to_numpy()
         m = pd.Series(lrv).rolling(22).mean().to_numpy()
         r5 = pd.Series(ret).rolling(5).sum().to_numpy()
+        fwd = pd.Series(rv).rolling(H).mean().shift(-H).to_numpy()   # mean RV over t+1..t+H
+        fwd_l = np.log(fwd + EPS)
         for t in range(L, len(rv) - 1):
-            if not np.isfinite([lrv[t], w[t], m[t], neg[t], pos[t], lrv[t + 1]]).all():
+            if not np.isfinite([lrv[t], w[t], m[t], neg[t], pos[t], fwd_l[t]]).all():
                 continue
-            rows.append((a, dates[t], rv[t], lrv[t + 1], lrv[t], w[t], m[t], neg[t], pos[t],
-                         np.log(15.0), r5[t] if np.isfinite(r5[t]) else 0.0, rv[t + 1]))
+            rows.append((a, dates[t], rv[t], fwd_l[t], lrv[t], w[t], m[t], neg[t], pos[t],
+                         np.log(15.0), r5[t] if np.isfinite(r5[t]) else 0.0, fwd[t]))
             WlogA.append(lrv[t - L + 1:t + 1]); WlevA.append(neg[t - L + 1:t + 1])
     R = pd.DataFrame(rows, columns=["asset", "date", "rv", "y", "har_d", "har_w", "har_m",
                                     "lev", "pos", "vix", "ret5", "rv_next"])
@@ -256,6 +262,8 @@ def main():
     else:
         print(f"Building panel … (device={DEV})")
         R, Wlog, Wlev, d = build(); tag = ""; rich = RICH
+    if H != 1:
+        tag += f"_h{H}"
     R = R.reset_index(drop=True)
     # per-asset precompute for EWMA / GARCH
     per = {}
@@ -340,22 +348,33 @@ def main():
     print(f"  coverage (finite preds): " + ", ".join(f"{m}={cov[m]}" for m in models) + "\n")
 
     hmask = np.isfinite(loss["HAR"])
-    print(f"  {'model':>11} {'QLIKE':>8} {'RMSE(log)':>10} {'IC':>7} {'DM vs HAR (p)':>16}")
-    summary = {}
-    qmeans = {}
+    qlike_har = float(np.nanmean(loss["HAR"][hmask]))
+    mse_har = float(np.nanmean((y_log[hmask] - P["HAR"].to_numpy()[hmask]) ** 2))
+    print(f"  {'model':>11} {'QLIKE':>8} {'MSE':>8} {'RMSE':>7} {'MAE':>7} {'MZ-R2':>7} "
+          f"{'R2vHAR%':>8} {'IC':>6} {'bias':>7} {'DMp':>6}")
+    summary = {}; qmeans = {}
     for m in models:
         mk = np.isfinite(P[m].to_numpy()) & np.isfinite(rv_true)
+        pm = P[m].to_numpy()[mk]; yy = y_log[mk]
         q = float(np.nanmean(loss[m][mk]))
-        rmse = float(np.sqrt(np.nanmean((y_log[mk] - P[m].to_numpy()[mk]) ** 2)))   # RMSE on log-mean
+        mse = float(np.nanmean((yy - pm) ** 2))
+        rmse = float(np.sqrt(mse))
+        mae = float(np.nanmean(np.abs(yy - pm)))
+        mz = float(mz_r2(yy, pm))
+        r2vhar = float((1 - q / qlike_har) * 100)                 # QLIKE skill vs HAR (%)
+        bias = float(np.nanmean(pm - yy))
         ic = float(spearmanr(np.sqrt(P[m + "__var"].to_numpy()[mk]), np.sqrt(rv_true[mk]))[0])
         qmeans[m] = q
         if m == "HAR":
-            dmp, p = "—", None
+            p = None; dmp = "—"
         else:
             cm = mk & hmask
             _, p = diebold_mariano(loss[m][cm], loss["HAR"][cm]); dmp = f"{p:.3f}"
-        summary[m] = {"QLIKE": q, "RMSE_log": rmse, "IC": ic, "DM_vs_HAR_p": None if p is None else float(p)}
-        print(f"  {m:>11} {q:>8.4f} {rmse:>10.4f} {ic:>7.3f} {dmp:>16}")
+        summary[m] = {"QLIKE": q, "MSE_log": mse, "RMSE_log": rmse, "MAE_log": mae,
+                      "MZ_R2": mz, "R2_vs_HAR_pct": r2vhar, "IC": ic, "bias": bias,
+                      "DM_vs_HAR_p": None if p is None else float(p)}
+        print(f"  {m:>11} {q:>8.4f} {mse:>8.4f} {rmse:>7.4f} {mae:>7.4f} {mz:>7.3f} "
+              f"{r2vhar:>+7.2f}% {ic:>6.3f} {bias:>+7.3f} {dmp:>6}")
     best = min(qmeans, key=qmeans.get)
     print(f"  best (lowest QLIKE): {best}")
 
@@ -371,7 +390,7 @@ def main():
     print("  indistinguishable from the best at 90% (survivors of the elimination test).")
 
     RESULTS.mkdir(exist_ok=True)
-    payload = {"n_forecasts": int(len(P)), "folds": fold,
+    payload = {"n_forecasts": int(len(P)), "folds": fold, "horizon": H,
                "universe": "omi" if omi else ("heldout" if heldout else "training"),
                "assets": sorted(R["asset"].unique().tolist()),
                "protocol": f"date-based walk-forward, min_train={MIN_TRAIN_D}d, test={TEST_D}d, embargo={EMBARGO_D}d",
