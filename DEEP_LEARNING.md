@@ -48,6 +48,26 @@ These are not in tension — they answer different questions:
 
 Forcing the deep net to also win forecasting would be dishonest (it doesn't) and would regress production.
 
+## EB-JEPA learned energy — tested and REJECTED (`ab_energy_fast.py`, `compare_energy.py`)
+
+The first DL research advance was to replace the fixed L2 latent-prediction-error energy with a **learned**
+energy head (EB-JEPA), trained by an in-batch contrastive objective. Apples-to-apples A/B (identical
+config, only the energy differs):
+
+| Energy | vol lift | ρ(E, realized vol) |
+|---|---|---|
+| **L2 (latent-MSE)** | **2.91×** | **+0.38** |
+| EB-JEPA (learned, contrastive) | 0.13× | −0.68 |
+
+**Verdict: rejected.** The learned contrastive energy is *anti*-correlated with volatility — decisively
+worse than the simple L2 energy. **Why (the principle):** a contrastive energy is trained to *discriminate*
+which future matches which prediction; that optimizes distinctiveness/ease-of-matching, not surprise. The
+L2 latent **prediction error** *is* surprise by construction, which is exactly why it gives the 4.4× lift.
+A discriminative learned energy is the wrong tool for this signal. (Caveat: this refutes the *contrastive*
+learned energy; a non-contrastive regularized EB-JEPA energy is a separate, lower-priority test — but the
+same principle predicts it is unlikely to beat direct prediction-error for a surprise score.) The L2
+energy stays the production surprise signal.
+
 ## Research roadmap (from the JEPA-variants deep-research pass, ranked by plausible lift)
 
 The neural core is the substrate for genuine world-model research. Evidence-ranked next steps:
