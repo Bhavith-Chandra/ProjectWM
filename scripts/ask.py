@@ -52,6 +52,24 @@ def main():
         return
     if args and args[0] == "--portfolio":
         print(portfolio(args[1:], market=mkt))
+        from meridian.analyze import portfolio_analysis
+        pa = portfolio_analysis(args[1:])
+        if pa.get("ok") and pa.get("crisis_stress", {}).get("scenarios"):
+            cs = pa["crisis_stress"]
+            print("\n" + "=" * 72)
+            print("PORTFOLIO CRISIS VOLATILITY STRESS-TEST (Empirical Volatility Scaling)")
+            print("=" * 72)
+            print(f"Current Calibrated 99% Portfolio VaR:  {cs['current_var99_pct']:.2f}%")
+            names = {"2008_GFC": "2008 GFC", "2020_COVID": "2020 COVID"}
+            for k, sc in cs["scenarios"].items():
+                print(f"  ↳ Stressed Scenario [{names.get(k, k):<10}]:   {sc['stressed_var99_pct']:.2f}%"
+                      f"  (x{sc['multiplier']:.2f} VaR, vol surge x{sc['vol_surge']:.2f})")
+                if cs.get("proxied", {}).get(k):
+                    print(f"      · proxied (no crisis-window history): {', '.join(cs['proxied'][k])}")
+            print("-" * 72)
+            print("* Scales asset vols to historical crisis peaks; PRESERVES current correlations")
+            print("  (validated: crisis vol drives portfolio tail risk, not correlation — see")
+            print("  scripts/validate_network.py). Gaussian 99% on the stressed vol.")
         return
     if args and args[0] == "--world":
         source = args[1]; shock = float(args[2]); extra = args[3:]

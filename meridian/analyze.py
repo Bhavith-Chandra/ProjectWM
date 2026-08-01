@@ -98,8 +98,56 @@ def _thesis(o: dict) -> str:
     return "\n".join(L)
 
 
+CRISIS_WINDOWS = (("2008_GFC", "2008-09-01", "2008-11-30"),
+                  ("2020_COVID", "2020-03-01", "2020-04-30"))
+
+
+def crisis_stress_test(rets: dict, syms: list, weights: np.ndarray,
+                       windows=CRISIS_WINDOWS, min_obs: int = 15) -> dict:
+    """Historical VOLATILITY stress test: scale each asset's vol to its GFC-2008 / COVID-2020 level
+    while PRESERVING the current correlation structure, then re-price the book's 99% VaR.
+
+    Why vol-only (not crisis correlations): our own decomposition (scripts/validate_network.py) showed
+    crisis correlations barely move portfolio coverage (25.6%→23.1%); crisis VOLATILITY carries it
+    (→7.7%). So this scales the honest lever and does NOT fabricate a crisis correlation map.
+
+    POST-GFC INCEPTION HANDLING (the real fix): an asset that IPO'd after a crisis window has no data
+    there. Rather than emit NaN, we PROXY its crisis vol = current_vol × (median vol-surge of the assets
+    that ARE present in that window) and flag it, so a 2021-listed name still gets a defensible stress
+    vol instead of poisoning the portfolio variance."""
+    Z99 = 2.326
+    recent = pd.DataFrame({s: rets[s] for s in syms}).dropna().iloc[-252:]
+    cur_vols = recent.std(ddof=1).to_numpy()
+    cur_cov = recent.cov().to_numpy()
+    dinv = np.diag(1.0 / (cur_vols + 1e-12)); corr = dinv @ cur_cov @ dinv
+    cur_var99 = Z99 * float(np.sqrt(weights @ cur_cov @ weights))
+    out = {"current_var99_pct": round(cur_var99 * 100, 2), "method": "Gaussian 99% on stressed vol; "
+           "current correlations preserved", "scenarios": {}, "proxied": {}}
+    for label, a, b in windows:
+        cvol = np.full(len(syms), np.nan); present = np.zeros(len(syms), bool)
+        for i, s in enumerate(syms):
+            wv = rets[s].loc[a:b].dropna()
+            if len(wv) >= min_obs:
+                cvol[i] = wv.std(ddof=1); present[i] = True
+        if present.sum() == 0:
+            continue
+        surge = float(np.median(cvol[present] / (cur_vols[present] + 1e-12)))   # market vol-surge
+        proxied = [syms[i] for i in range(len(syms)) if not present[i]]
+        for i in range(len(syms)):
+            if not present[i]:
+                cvol[i] = cur_vols[i] * surge                                   # honest proxy
+        D = np.diag(cvol); stressed_cov = D @ corr @ D
+        s_var99 = Z99 * float(np.sqrt(weights @ stressed_cov @ weights))
+        out["scenarios"][label] = {"stressed_var99_pct": round(s_var99 * 100, 2),
+                                   "multiplier": round(s_var99 / (cur_var99 + 1e-12), 2),
+                                   "vol_surge": round(surge, 2)}
+        if proxied:
+            out["proxied"][label] = proxied
+    return out
+
+
 def portfolio_analysis(entities: list[str]) -> dict:
-    """Covariance + minimum-variance optimization + portfolio Monte-Carlo for a basket."""
+    """Covariance + minimum-variance optimization + crisis volatility stress-test for a basket."""
     from sklearn.covariance import LedoitWolf
     rets, syms = {}, []
     for q in entities:
@@ -121,7 +169,8 @@ def portfolio_analysis(entities: list[str]) -> dict:
     ew = np.ones(n) / n
     return {"ok": True, "symbols": syms, "min_var_weights": {syms[i]: round(w[i] * 100) for i in range(n)},
             "min_var_vol_pct": round(pv(w) * 100, 1), "equal_weight_vol_pct": round(pv(ew) * 100, 1),
-            "risk_reduction_pct": round((1 - pv(w) / pv(ew)) * 100)}
+            "risk_reduction_pct": round((1 - pv(w) / pv(ew)) * 100),
+            "crisis_stress": crisis_stress_test(rets, syms, w)}
 
 
 if __name__ == "__main__":
