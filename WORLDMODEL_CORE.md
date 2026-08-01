@@ -47,21 +47,23 @@ Deep Markov / RSSM-style, with the three finance-specific upgrades the research 
 
 A world model earns the name by reproducing the world's behavior, not by point-forecast accuracy.
 
-| Test | Result | Verdict |
+| Test | Result (shipped checkpoint `results/worldmodel.pt`) | Verdict |
 |---|---|---|
-| **Stylized facts** (Cont 2001): fat tails, vol clustering, leverage | reproduced — kurtosis ~5 (real 4.5) via Student-t, positive ACF\|r\|, correct leverage sign — vs an i.i.d. baseline of ~0 | ✅ learned real dynamics |
-| **Aggregational Gaussianity** (daily fat tails → near-Gaussian monthly) | REAL 4.45→0.49 vs model 5.26→0.41 — a *hard* test most naive models fail | ✅ passes |
-| **Scenario VaR** (1-day 99% from filtered-state emission, OOS) | breach **~2.4%** (target 1.0%) — usable | ◑ reasonable, slightly tight |
-| **What-if** (structural `u_t` shock) | coherent market-wide risk-off: equities ≈ −5 bps, havens flat/up | ✅ economically sensible |
-| **Free-running LONG rollout (1400 steps)** | unstable / high run-to-run variance (kurtosis can overshoot) | ⚠️ **documented limitation** |
+| **Stylized facts** (Cont 2001): fat tails, vol clustering, leverage | learned — ACF\|r\| 0.36 (real 0.13), kurtosis 26 (real 4.5), leverage sign correct −0.02 (real −0.06) — decisively beats the i.i.d.-Gaussian baseline (ACF ~0, kurtosis ~0) | ✅ learned dynamics, but **overshoots** |
+| **Aggregational Gaussianity** (daily fat tails → near-Gaussian monthly) | falls REAL 4.45→0.49 vs model 26→7.9 — direction right, magnitude too fat | ◑ direction right |
+| **Scenario VaR** (1-day 99% from filtered-state emission, OOS, 1402 days) | breach **3.1%** (target 1.0%) — under-calibrated | ◑ **looser than the EVT-GPD specialist (0.94%)** |
+| **What-if** (structural `u_t` shock) | coherent flight-to-quality: equities −1 to −4 bps, TLT/IEF/LQD **+**, over 5 days | ✅ economically sensible |
+| **Free-running LONG rollout** | unstable; high run-to-run variance (kurtosis overshoots to ~26 this run) | ⚠️ **documented limitation** |
 
-**Honest bottom line:** the model **demonstrably learned market dynamics** (fat tails + aggregational
-Gaussianity are hard to fake), emits **usable calibrated 1-day risk**, and produces **coherent
-structural what-ifs**. Its **long free-running simulation is unstable** — a fundamental limitation of
-deep state-space models on noisy daily data (the research warned: *"the honest rollout horizon is days,
-not weeks — report where calibration breaks"*). So the **honest usable horizon is short (1-day
-calibrated; multi-day directional)**; we do not claim stable long free-runs. That boundary is the
-frontier, stated plainly — not hidden.
+**Honest bottom line:** the model **demonstrably learned market dynamics** (vol clustering + fat tails
+vs a flat i.i.d. baseline are hard to fake) and produces **coherent structural what-ifs** — but on this
+run it **overshoots** (kurtosis 26 vs 4.5) and its 1-day scenario VaR breaches **3.1%**, i.e. it is a
+**joint SIMULATOR, not a calibrated tail** — looser than the EVT-GPD specialist (0.94%). So its wired
+role (`analyze.world_portfolio_scenario`, surfaced in `ask.py --portfolio`) is **coherent joint
+cross-asset structure + what-ifs, NOT a tighter VaR** — the calibrated tail number stays the
+EVT-GPD/min-variance figure. The honest usable horizon is short (1-day directional; long free-runs
+unstable). That boundary is the frontier, stated plainly — the next world-model work is stabilizing the
+free-run (variance floors / lower Student-t weight) so the simulator's calibration matches the specialist.
 
 ## Research-backed next steps (verified deep-research pass wlp6oec7l)
 

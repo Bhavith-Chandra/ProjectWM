@@ -70,6 +70,18 @@ def main():
             print("* Scales asset vols to historical crisis peaks; PRESERVES current correlations")
             print("  (validated: crisis vol drives portfolio tail risk, not correlation — see")
             print("  scripts/validate_network.py). Gaussian 99% on the stressed vol.")
+        ws = pa.get("world_scenario", {}) if pa.get("ok") else {}
+        if ws.get("available"):
+            print("\n" + "=" * 72)
+            print("JOINT WORLD-MODEL SCENARIO (coherent cross-asset paths, learned latent dynamics)")
+            print("=" * 72)
+            print(f"  {ws['horizon_days']}-day joint 99% VaR: {ws['joint_var99_pct']:.2f}%  |  "
+                  f"ES: {ws['joint_es99_pct']:.2f}%  |  median: {ws['median_pct']:+.2f}%  "
+                  f"({ws['n_paths']} paths)")
+            print("  * Coherent JOINT cross-asset simulation from the world-model core (worldmodel.py) —")
+            print("    its value is joint structure + structural what-ifs, NOT a tighter VaR. It is a")
+            print("    directional joint scenario (~3% breach vs 1% target); the calibrated tail number")
+            print("    is the EVT-GPD/min-variance figure above. See WORLDMODEL_CORE.md.")
         return
     if args and args[0] == "--world":
         source = args[1]; shock = float(args[2]); extra = args[3:]

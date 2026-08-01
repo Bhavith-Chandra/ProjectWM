@@ -27,6 +27,26 @@ import torch.nn.functional as F
 
 EPS = 1e-6
 
+# the fixed universe the checkpoint (results/worldmodel.pt) is trained on, in column order.
+TRAINED_UNIVERSE = ["SPY", "QQQ", "IWM", "DIA", "TLT", "IEF", "LQD", "HYG", "GLD", "EEM", "EFA"]
+WM_SCALE = 100.0                                            # returns are trained on *100 for stability
+
+
+def load_pretrained(path=None):
+    """Load the trained world model + its asset order. Returns (model, assets) or (None, None) if the
+    checkpoint isn't present. The model is fixed to TRAINED_UNIVERSE (joint scenarios only for those
+    assets); arbitrary portfolios fall back to the per-asset engine."""
+    from pathlib import Path
+    p = Path(path) if path else Path(__file__).resolve().parent.parent / "results" / "worldmodel.pt"
+    if not p.exists():
+        return None, None
+    m = MeridianWorldModel(len(TRAINED_UNIVERSE), K=12, n_factors=3)
+    try:
+        m.load_state_dict(torch.load(p, map_location="cpu")); m.eval()
+    except Exception:
+        return None, None
+    return m, list(TRAINED_UNIVERSE)
+
 
 def mlp(sizes, act=nn.GELU):
     layers = []

@@ -150,6 +150,59 @@ def crisis_stress_test(rets: dict, syms: list, weights: np.ndarray,
     return out
 
 
+def world_portfolio_scenario(entities: list[str], weights=None, horizon: int = 1,
+                             n_paths: int = 3000) -> dict:
+    """JOINT multi-asset scenario from the WORLD-MODEL core — coherent cross-asset return paths sampled
+    from the learned latent dynamics (the world model's unique capability), vs the per-asset FHS which
+    ignores learned joint structure. Filters the current joint latent state from recent returns of the
+    FULL trained universe, then emits/rolls the portfolio's assets jointly.
+
+    Scope (honest): only for portfolios whose assets are ALL in the trained universe (major ETFs); else
+    available=False and the caller uses FHS. Horizon: the world model is 1-day calibrated / multi-day
+    directional (WORLDMODEL_CORE.md), so default horizon=1 for a calibrated joint VaR."""
+    try:
+        import torch
+        from meridian.worldmodel import load_pretrained, WM_SCALE
+    except Exception:
+        return {"available": False, "reason": "torch unavailable"}
+    wm, uni = load_pretrained()
+    if wm is None:
+        return {"available": False, "reason": "no trained world-model checkpoint (run scripts/train_worldmodel.py)"}
+    syms = []
+    for e in entities:
+        r = resolve(e)
+        if not r or not r.get("symbol"):
+            return {"available": False, "reason": f"could not resolve {e}"}
+        syms.append(r["symbol"])
+    outside = [s for s in syms if s not in uni]
+    if outside:
+        return {"available": False, "reason": f"outside trained universe: {outside}"}
+    try:
+        cols = {a: np.log(fetch_yahoo(a)["adjclose"]).diff() for a in uni}
+        R = pd.DataFrame(cols).dropna().iloc[-250:]
+        Rt = torch.tensor(R.to_numpy() * WM_SCALE, dtype=torch.float32)
+        z = wm.filter_state(Rt.unsqueeze(0))[0]
+        if horizon <= 1:
+            paths = wm.emit_sample(z, n_paths=n_paths).numpy() / WM_SCALE          # [P,N] 1-day
+        else:
+            paths = wm.rollout(z, steps=horizon, n_paths=n_paths).sum(1).numpy() / WM_SCALE  # cumulative
+    except Exception as ex:
+        return {"available": False, "reason": f"world-model sampling failed: {ex}"}
+    idx = [uni.index(s) for s in syms]; n = len(syms)
+    w = np.asarray(weights) if weights is not None else np.ones(n) / n
+    port = paths[:, idx] @ w
+    q = np.percentile(port, [1, 5, 50, 95])
+    return {"available": True, "horizon_days": horizon, "n_paths": n_paths, "engine": "world-model (joint)",
+            "joint_var99_pct": round(float(q[0]) * 100, 2), "joint_var95_pct": round(float(q[1]) * 100, 2),
+            "joint_es99_pct": round(float(port[port <= q[0]].mean()) * 100, 2),
+            "median_pct": round(float(q[2]) * 100, 2),
+            # HONEST calibration: the world model is a joint SIMULATOR, not the calibrated tail. Its 1-day
+            # scenario VaR breaches ~3% vs a 1% target (scripts/train_worldmodel.py test 2) — looser than
+            # the EVT-GPD specialist (0.94%). Value = cross-asset COHERENCE + what-ifs, not a tighter VaR.
+            "calibration": "directional joint scenario (~3% breach vs 1% target); for the calibrated tail "
+                           "use the EVT-GPD/FHS number — the world model adds joint coherence, not tighter VaR"}
+
+
 def portfolio_analysis(entities: list[str]) -> dict:
     """Covariance + minimum-variance optimization + crisis volatility stress-test for a basket."""
     from sklearn.covariance import LedoitWolf
@@ -174,7 +227,8 @@ def portfolio_analysis(entities: list[str]) -> dict:
     return {"ok": True, "symbols": syms, "min_var_weights": {syms[i]: round(w[i] * 100) for i in range(n)},
             "min_var_vol_pct": round(pv(w) * 100, 1), "equal_weight_vol_pct": round(pv(ew) * 100, 1),
             "risk_reduction_pct": round((1 - pv(w) / pv(ew)) * 100),
-            "crisis_stress": crisis_stress_test(rets, syms, w)}
+            "crisis_stress": crisis_stress_test(rets, syms, w),
+            "world_scenario": world_portfolio_scenario(syms, weights=w)}   # joint WM scenario if in-universe
 
 
 if __name__ == "__main__":
