@@ -179,7 +179,7 @@ def world_portfolio_scenario(entities: list[str], weights=None, horizon: int = 1
         return {"available": False, "reason": f"outside trained universe: {outside}"}
     try:
         cols = {a: np.log(fetch_yahoo(a)["adjclose"]).diff() for a in uni}
-        R = pd.DataFrame(cols).dropna().iloc[-250:]
+        R = pd.DataFrame(cols).dropna().iloc[-260:]
         Rt = torch.tensor(R.to_numpy() * WM_SCALE, dtype=torch.float32)
         z = wm.filter_state(Rt.unsqueeze(0))[0]
         if horizon <= 1:
@@ -192,15 +192,17 @@ def world_portfolio_scenario(entities: list[str], weights=None, horizon: int = 1
     w = np.asarray(weights) if weights is not None else np.ones(n) / n
     port = paths[:, idx] @ w
     q = np.percentile(port, [1, 5, 50, 95])
+    # HONEST calibration (scripts/world_calib_validate.py): the RAW world-model 1-day joint VaR is
+    # regime-dependent — Kupiec-PASSES over recent data (1.6% breach, p=0.21) but degrades over the full
+    # 2008-2020 test incl. COVID (~3.1%). A hybrid EWMA-marginal rescale was tested and made it WORSE
+    # (2.2%, EWMA under-disperses in calm markets), so it was rejected. Value = joint cross-asset
+    # coherence + what-ifs; for the single-book calibrated tail across regimes, the EVT-GPD is tighter.
     return {"available": True, "horizon_days": horizon, "n_paths": n_paths, "engine": "world-model (joint)",
             "joint_var99_pct": round(float(q[0]) * 100, 2), "joint_var95_pct": round(float(q[1]) * 100, 2),
             "joint_es99_pct": round(float(port[port <= q[0]].mean()) * 100, 2),
             "median_pct": round(float(q[2]) * 100, 2),
-            # HONEST calibration: the world model is a joint SIMULATOR, not the calibrated tail. Its 1-day
-            # scenario VaR breaches ~3% vs a 1% target (scripts/train_worldmodel.py test 2) — looser than
-            # the EVT-GPD specialist (0.94%). Value = cross-asset COHERENCE + what-ifs, not a tighter VaR.
-            "calibration": "directional joint scenario (~3% breach vs 1% target); for the calibrated tail "
-                           "use the EVT-GPD/FHS number — the world model adds joint coherence, not tighter VaR"}
+            "calibration": "raw WM joint scenario — Kupiec-passes recently (1.6%), looser over stress "
+                           "(~3.1%); joint coherence + what-ifs, EVT-GPD for the calibrated single-book tail"}
 
 
 def portfolio_analysis(entities: list[str]) -> dict:
