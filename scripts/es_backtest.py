@@ -52,41 +52,57 @@ def christoffersen(hits):
 
 
 def acerbi_z2(ret, var, es, p=1 - Q):
-    """Acerbi-Szekely Test 2: Z = mean( ret*1[ret<-var] / (n*p*(-es)) ) + 1; ~0 if ES correct."""
+    """Acerbi-Szekely (2014) Test 2: Z2 = (1/(N·p))·Σ X_t·I_t/ES_t + 1, with ES_t the POSITIVE expected
+    shortfall and X_t the (signed) return. ≈0 if ES correct; <0 ⇒ ES too conservative (predicts worse
+    than realized); >0 ⇒ ES too optimistic (realized losses exceed predicted ES). `es`/`var` are passed
+    as positive loss magnitudes here."""
     r, v, e = map(np.asarray, (ret, var, es))
     hit = r < -v
     if hit.sum() == 0:
         return float("nan")
-    z = np.sum(r[hit] / (len(r) * p * (-e[hit]))) + 1.0
-    return float(z)                                        # >0 ⇒ ES too optimistic (under-predicts loss)
+    z = np.sum(r[hit] / (len(r) * p * e[hit])) + 1.0       # X_t negative / ES positive → sum ≈ -1 if exact
+    return float(z)
+
+
+def ewma_vol(r, lam=0.94):
+    """RiskMetrics EWMA daily-vol series (fast-reacting), annualized. Causal: v[t] uses r[<t]."""
+    v = np.empty(len(r)); s2 = np.var(r[:20]) if len(r) > 20 else np.var(r)
+    for i in range(len(r)):
+        v[i] = np.sqrt(s2 * TRADING)
+        s2 = lam * s2 + (1 - lam) * r[i] ** 2               # update AFTER emitting (no lookahead)
+    return v
 
 
 def main():
-    print(f"EVT-GPD tail backtest — 1-day 99% VaR/ES, {WIN}d rolling OOS\n")
-    print(f"  {'asset':>6} {'n':>5} {'breach%':>8} {'Kupiec':>7} {'Chris.ind':>9} {'Acerbi Z2':>10}  verdict")
-    agg_hits = []; agg_z = []
-    for a in ASSETS:
-        try:
-            ret = realized_variance(fetch_yahoo(a))["ret"].dropna()
-        except Exception:
-            continue
-        r = ret.to_numpy(); n = len(r)
-        vars_, ess_, rl = [], [], []
-        for t in range(WIN, n - 1):
-            w = pd.Series(r[t - WIN:t])
-            sig = np.std(r[t - 252:t]) * np.sqrt(TRADING)   # trailing realized vol as sigma_now
-            var, es = _tail(w, sig, q=Q)                    # signed (negative)
-            vars_.append(-var); ess_.append(-es); rl.append(r[t + 1])   # store positive VaR/ES
-        vars_, ess_, rl = map(np.array, (vars_, ess_, rl))
-        hits = rl < -vars_; nb = int(hits.sum()); m = len(rl)
-        kp = kupiec(nb, m); ci = christoffersen(hits); z2 = acerbi_z2(rl, vars_, ess_)
-        agg_hits.append(hits.mean()); agg_z.append(z2)
-        ok = (nb / m < 0.02) and (not np.isnan(kp) and kp > 0.05)
-        print(f"  {a:>6} {m:>5} {nb/m*100:>7.2f}% {kp:>7.3f} {ci:>9.3f} {z2:>10.3f}  "
-              f"{'PASS' if ok else 'review'}")
-    print(f"\n  MEAN breach {np.mean(agg_hits)*100:.2f}% (target 1.0%) | mean Acerbi Z2 {np.nanmean(agg_z):.3f} "
-          f"(0 = ES exact; >0 = ES slightly optimistic)")
-    print("  Kupiec/Christoffersen p>0.05 ⇒ coverage & independence not rejected. |Z2| small ⇒ ES well-sized.")
+    print(f"EVT-GPD tail backtest — 1-day 99% VaR/ES, {WIN}d rolling OOS")
+    print("Compares sigma_now = TRAILING realized vol (slow) vs EWMA dynamic vol (fast — what the live")
+    print("engine effectively uses via the HAR-lev+IV forecast). Fix hypothesis: dynamic sigma stops")
+    print("breach CLUSTERING (Christoffersen independence).\n")
+    for tag, use_ewma in [("TRAILING sigma (slow)", False), ("EWMA dynamic sigma (fast)", True)]:
+        print(f"  === {tag} ===")
+        print(f"  {'asset':>6} {'n':>5} {'breach%':>8} {'Kupiec':>7} {'Chris.ind':>9} {'Acerbi Z2':>10}")
+        agg_hits = []; agg_z = []; agg_ci = []
+        for a in ASSETS:
+            try:
+                ret = realized_variance(fetch_yahoo(a))["ret"].dropna()
+            except Exception:
+                continue
+            r = ret.to_numpy(); n = len(r)
+            ev = ewma_vol(r) if use_ewma else None
+            vars_, ess_, rl = [], [], []
+            for t in range(WIN, n - 1):
+                w = pd.Series(r[t - WIN:t])
+                sig = ev[t] if use_ewma else np.std(r[t - 252:t]) * np.sqrt(TRADING)
+                var, es = _tail(w, sig, q=Q)
+                vars_.append(-var); ess_.append(-es); rl.append(r[t + 1])
+            vars_, ess_, rl = map(np.array, (vars_, ess_, rl))
+            hits = rl < -vars_; nb = int(hits.sum()); m = len(rl)
+            kp = kupiec(nb, m); ci = christoffersen(hits); z2 = acerbi_z2(rl, vars_, ess_)
+            agg_hits.append(hits.mean()); agg_z.append(z2); agg_ci.append(ci)
+            print(f"  {a:>6} {m:>5} {nb/m*100:>7.2f}% {kp:>7.3f} {ci:>9.3f} {z2:>10.3f}")
+        passes = int(np.sum([c > 0.05 for c in agg_ci if not np.isnan(c)]))
+        print(f"  MEAN breach {np.mean(agg_hits)*100:.2f}% | mean Acerbi Z2 {np.nanmean(agg_z):.3f} | "
+              f"Christoffersen independence PASSES {passes}/{len(agg_ci)} assets\n")
 
 
 if __name__ == "__main__":

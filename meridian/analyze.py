@@ -83,7 +83,11 @@ def _thesis(o: dict) -> str:
          *( [f"- **⚠ Early-warning:** VIX term structure is **inverted** "
              f"(VIX9D/VIX3M = {o['iv_early_warning'].get('ratio9d_3m')}) — the market is pricing "
              f"near-term stress. This signal leads realized-vol stress onset by a median ~6 trading "
-             f"days (70% of onsets, 52% precision; scripts/iv_earlywarning.py)."]
+             f"days (70% of onsets, 52% precision; scripts/iv_earlywarning.py).",
+             "- **Optional de-risk rule (validated):** halving equity exposure while the structure is "
+             "inverted historically cut max drawdown ~27% (−35.7%→−26.2%) and raised Sortino "
+             "(0.93→0.98) for ~2.5pp/yr of return foregone — a *moderate* haircut only; a full exit "
+             "underperformed (scripts/earlywarning_overlay.py). A systematic rule, not advice."]
             if o.get("iv_early_warning", {}).get("inverted") else
             [f"- **Note:** the VIX term-structure feed is stale "
              f"({o['iv_early_warning'].get('age_days')}d old) — early-warning signal withheld to avoid "
