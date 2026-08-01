@@ -1,13 +1,68 @@
-# Meridian
+# Meridian — Enterprise World Model for financial markets
 
-A market **belief-state** core that reads daily equity + FX data, tracks the
-current regime, forecasts next-day volatility, and emits a live **surprise
-score** — benchmarked honestly against HAR-RV (volatility) and a Gaussian HMM
-(regimes) under a pre-registered, leakage-controlled protocol.
+Meridian is an **interactive, interpretable world model** for market **risk and volatility**.
+Ask about *any* entity ("Apple", "the DAX", "bitcoin", "SPY vs gold", "what if the market drops
+5%?") and it fetches data live, runs a bank of calibrated modules, and **explains** the answer —
+volatility forecast, regime, tail risk (VaR/ES), and portfolio/covariance risk. Every number is a
+calibrated-module output, never a guess. It is best-in-class where measured, and **honest about the
+limits** (see [`BENCHMARK.md`](BENCHMARK.md), [`COMPARISON.md`](COMPARISON.md)).
 
-> Adapts the JEPA idea (predict the *latent* of the future, not the pixels) to
-> financial time series, with a diagonal **SSM belief core** and a **SIGReg**
-> anti-collapse regularizer, plus supervised volatility and regime read-outs.
+## What it is, in one picture
+
+```
+             USER — any question · any entity
+                          │
+                    ┌─────▼─────┐   the ENGINE routes the question by intent
+                    │  ROUTER   │   (engine.py: analyze/compare/scenario/world/portfolio)
+                    └─────┬─────┘
+      ┌──────────┬────────┼─────────┬──────────────┬─────────────┐
+      ▼          ▼        ▼         ▼              ▼             ▼
+  Volatility   Regime    Tail    Covariance   Network        (each a decoupled
+ (Regime-      (by-       (EVT     / Portfolio  propagation    SPECIALIST, its own
+  Meridian)    design)    VaR/ES)  (min-var)    (gen-IRF)      objective + validation)
+      └──────────┴────────┴────┬────┴──────────────┴─────────────┘
+                          ┌─────▼─────┐   glass-box combiner + provenance ledger
+                          │  ANSWER   │   (numbers ONLY from modules, explained)
+                          └───────────┘
+```
+Rendered diagram: [`results/architecture.jpg`](results/architecture.jpg) · system doc: `results/system_document.html`.
+
+## Is it one model, or does it route? → **It routes to specialists (by design).**
+
+Meridian is **not** one monolithic model — it is a **bank of decoupled specialist modules, routed
+by an interactive engine.** This is a proven choice, not a preference:
+
+- **Different tasks need different objectives.** Volatility optimizes QLIKE; tail risk optimizes
+  *coverage*; portfolio optimizes *variance/Sharpe*. One model can only be optimal for one loss.
+- **We measured the monolith failing.** A single neural net trying to do everything (`Meridian-net`)
+  had good squared-error but its **QLIKE blew up out-of-sample** (2.05) — fragile. The routed linear
+  specialists were robust and won the decisive metrics. (Earlier, collapsing modules into one shared
+  network degraded every task — the "design law" in [`WORLD_MODEL.md`](WORLD_MODEL.md).)
+- **Routing keeps it interpretable and improvable.** You can upgrade one module (we did — see
+  Regime-Meridian) without retraining or risking the others; and every number is traceable to the
+  module that produced it.
+
+**How routing works** — the engine detects intent and dispatches to the right specialist:
+
+| A user asks… | Routed to | Optimizes |
+|---|---|---|
+| "how risky is X?" | Volatility + Regime + EVT tail | QLIKE / coverage |
+| "A vs B" | compare (runs the read on both) | — |
+| "what if the market drops 5%?" | Network propagation (generalized-IRF) | co-movement |
+| "build a low-risk basket" | Covariance → min-variance | Sharpe / variance |
+| "what's my downside?" | EVT tail → VaR / ES | tail coverage |
+
+To the user it feels like *one* model (one interface, one conversation via `scripts/ask.py`); under
+the hood it's a routed bank of independently-validated specialists. The **conversational contract**
+(`meridian/tools.py`) guarantees the LLM only *routes and explains* — it can never originate a number.
+
+### Who wins each task (all out-of-sample, from [`COMPARISON.md`](COMPARISON.md))
+- **Volatility forecast** → **Regime-Meridian** (lowest QLIKE, +4.4% vs HAR, DM-significant, MCS member)
+- **Portfolio risk** → **Meridian min-variance** (best Sharpe 0.71; −49% risk vs the naive portfolio; beats sample-cov)
+- **Tail risk** → **Meridian conditional-EVT** (most exact 99% VaR coverage)
+
+*Honest ceiling: the volatility edge over HAR is ~4% (real, significant, not huge — that's the frontier
+on free data). The large, clean margins live in portfolio risk vs the tools people actually use.*
 
 ## Why this is set up to be honest, not flattering
 
@@ -82,34 +137,48 @@ full numbers in `results/benchmark_vol.{json,csv}`.
 ## Layout
 
 ```
-PREREGISTRATION.md        locked evaluation protocol + win criteria
-meridian/
-  data.py                 Yahoo (daily OHLC) + FRED (VIX, yields), cached
-  features.py             realized-variance estimators, HAR features, targets
-  evalproto.py            purged walk-forward, QLIKE, MZ-R2, Diebold-Mariano
-  baselines.py            HAR-RV, AR(1), AR(3), EWMA, GARCH(1,1)
-  model.py                SSM belief core + JEPA predictor + SIGReg + heads
-  windows.py              leakage-safe windowing / scaling
-  regimes.py              HMM + Meridian-belief regime metrics
+meridian/                           the modules (the routed specialists)
+  data.py            Yahoo (global OHLC) + FRED loaders, live-fetch, cached
+  data_omi.py        Oxford-Man Realized Library parser (independent 5-min RV)
+  heldout.py         24 never-trained assets for out-of-sample validation
+  features.py        realized-variance estimators, HAR cascade, targets
+  evalproto.py       purged/embargoed walk-forward, QLIKE, MZ-R², Diebold-Mariano
+  engine.py          THE ROUTER — resolve entity → dispatch to modules → explain
+  tools.py           conversational contract (LLM routes/explains; modules own numbers)
+  network.py         generalized-IRF shock propagation ("what-if" scenarios)
+  switching.py, meridian_wm.py   regime module internals
 scripts/
-  run_baselines.py        fit baselines -> results/baseline_predictions.parquet
-  run_meridian.py         walk-forward train/eval -> meridian_predictions.parquet
-  compare.py              volatility verdict vs HAR-RV (pre-registered)
-  compare_regimes.py      regime verdict vs HMM
-  fit_final.py            final model + demo_state.json for the live demo
-demo/                     self-contained market-state dashboard
+  ask.py             interactive CLI: analyze / compare / scenario / world / portfolio
+  benchmark_vol.py   forecasting benchmark (universes × horizons, all metrics, MCS)
+  frontier_intraday.py   intraday-measure ladder + Regime-Meridian (champion)
+  interpret_meridian.py  layer-by-layer interpretation (coeffs, ablation, per-regime)
+  risk_benchmark.py  portfolio-risk + tail-risk benchmark
+  compile_comparison.py  builds COMPARISON.md (every model, starred winners)
+BENCHMARK.md         genuine out-of-sample validation write-up
+COMPARISON.md        detailed model comparison, winners starred
+WORLD_MODEL.md       the module bank + design law + interpretability standard
+results/             saved metrics (*.json), architecture.jpg, dashboards
 ```
 
 ## Run it
 
 ```bash
 python3 -m venv --system-site-packages .venv && source .venv/bin/activate
-pip install statsmodels hmmlearn arch          # rest inherited from system
-python scripts/run_baselines.py
-python scripts/run_meridian.py
-python scripts/compare.py
-python scripts/compare_regimes.py
-python scripts/fit_final.py
+pip install statsmodels arch scikit-learn torch openpyxl   # rest inherited from system
+
+# ask about any entity (routes to the right modules, explains):
+python scripts/ask.py "Apple"
+python scripts/ask.py "SPY vs gold"
+python scripts/ask.py --world SPY -0.05 "Tesla"     # what-if a market shock
+python scripts/ask.py --portfolio SPY TLT GLD NVDA  # min-variance basket
+
+# reproduce the benchmarks (every number in the docs):
+python scripts/benchmark_vol.py                     # training universe
+MERIDIAN_HELDOUT=1 python scripts/benchmark_vol.py  # 24 never-trained assets
+MERIDIAN_OMI=1     python scripts/benchmark_vol.py  # 17 intl indices (independent source)
+python scripts/frontier_intraday.py                 # Regime-Meridian champion
+python scripts/risk_benchmark.py                    # portfolio + tail risk
+python scripts/compile_comparison.py                # -> COMPARISON.md
 ```
 
 ## Provenance & relationship to prior work
