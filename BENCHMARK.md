@@ -158,8 +158,13 @@ universes — a principled, interpretation-driven gain, not a tuning artifact. I
 
 - **The edge is modest.** ~4–5% QLIKE over HAR. It is statistically significant OOS (large sample,
   DM p<0.001, MCS) but it is not a step-change — HAR is a genuinely strong baseline.
-- **Horizon.** Reported at h=1 (next-day). The literature (and our roadmap) expects the edge to be
-  *larger and clearer at h=5 and h=22*; multi-horizon results are the next addition.
+- **Horizon (measured, correcting an earlier expectation).** The edge **peaks at h=1–5 (~3–4%)
+  and FADES toward zero at h=22** — on held-out it is slightly negative (−0.8%, not significant);
+  on OMI it shrinks to +0.9%. This is the *opposite* of the literature's "edge grows with horizon"
+  prediction: at monthly horizon the forecast is dominated by the slow HAR monthly component, which
+  plain HAR already captures, so Meridian's short-horizon features (daily semivariance, leverage,
+  jumps) add little. Meridian's advantage is a **daily-to-weekly** phenomenon. Full grid:
+  `results/benchmark_master_table.md`.
 - **Not yet done for full publishability:** per-asset dispersion tables, Mincer–Zarnowitz calibration
   per index, a Hansen SPA test controlling for the specification search, and multi-horizon (1/5/22).
   These strengthen — they don't change — the h=1 conclusion, and are the immediate next steps.
