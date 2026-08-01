@@ -95,6 +95,22 @@ register("csv", csv_upload)
 register("news", news_headlines)
 
 
+def freshness(series: pd.Series, max_age_days: int = 7) -> dict:
+    """Provenance/freshness audit for any exogenous series (the review's data-alignment concern).
+
+    Mixing daily equity data (NYSE calendar) with FRED macro (weekly/monthly, revised, different
+    holidays) means a naive ffill can pair a stale macro value with today's tape. This returns the age
+    of the latest real print and a `stale` flag so the caller can flag informational decay in the thesis
+    rather than silently trusting a decayed value. Use per exogenous input, not on the price tape."""
+    s = series.dropna()
+    if not len(s):
+        return {"available": False}
+    last = s.index[-1]
+    age = int((pd.Timestamp.utcnow().tz_localize(None) - pd.Timestamp(last)).days)
+    return {"available": True, "as_of": str(pd.Timestamp(last).date()),
+            "age_days": age, "stale": age > max_age_days}
+
+
 @dataclass
 class Connection:
     """A named handle over registered sources, so a user 'connects' once and reuses."""

@@ -84,7 +84,10 @@ def _thesis(o: dict) -> str:
              f"(VIX9D/VIX3M = {o['iv_early_warning'].get('ratio9d_3m')}) — the market is pricing "
              f"near-term stress. This signal leads realized-vol stress onset by a median ~6 trading "
              f"days (70% of onsets, 52% precision; scripts/iv_earlywarning.py)."]
-            if o.get("iv_early_warning", {}).get("inverted") else [] ),
+            if o.get("iv_early_warning", {}).get("inverted") else
+            [f"- **Note:** the VIX term-structure feed is stale "
+             f"({o['iv_early_warning'].get('age_days')}d old) — early-warning signal withheld to avoid "
+             f"acting on decayed data."] if o.get("iv_early_warning", {}).get("stale") else [] ),
          ("- **Forecaster:** implied-vol-augmented HAR (matched IV family + VIX term structure) — "
           "the +10.3%-over-HAR model validated OOS (DM p<0.001)."
           if o.get("forecast_model") == "HAR-lev+IV" else

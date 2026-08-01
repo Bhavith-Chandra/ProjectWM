@@ -55,11 +55,15 @@ def load_iv(refresh: bool = False) -> dict[str, pd.Series]:
     return out
 
 
-def term_structure_warning(iv: dict | None = None) -> dict:
+def term_structure_warning(iv: dict | None = None, max_age_days: int = 5) -> dict:
     """VIX term-structure inversion early-warning (validated in scripts/iv_earlywarning.py):
     VIX9D/VIX3M > 1 (near-term fear exceeding medium-term) LEADS realized-vol stress onset by a median
     ~6 trading days, catching 70% of onsets with 52% precision vs a 13% base rate. Returns the latest
-    signal state. Market-wide (US equity vol), so informative for equity-linked assets."""
+    signal state. Market-wide (US equity vol), so informative for equity-linked assets.
+
+    FRESHNESS GUARD: if the latest term-structure print is older than `max_age_days`, the feed is stale
+    (e.g. a frozen/halted IV source) — we do NOT fire the flag off a stale value; we report stale=True so
+    the thesis can flag informational decay instead of acting on a decayed signal."""
     iv = iv if iv is not None else load_iv()
     v9d, v3m = iv.get("VIX9D"), iv.get("VIX3M")
     if v9d is None or v3m is None or not len(v9d) or not len(v3m):
@@ -68,9 +72,12 @@ def term_structure_warning(iv: dict | None = None) -> dict:
     idx = a.index.intersection(b.index)
     if not len(idx):
         return {"available": False}
+    as_of = idx[-1]
+    age = int((pd.Timestamp.utcnow().tz_localize(None) - as_of).days)
     ratio = float(a.reindex(idx).iloc[-1] / b.reindex(idx).iloc[-1])
-    return {"available": True, "inverted": ratio > 1.0, "ratio9d_3m": round(ratio, 3),
-            "as_of": str(idx[-1].date())}
+    stale = age > max_age_days
+    return {"available": True, "inverted": (ratio > 1.0) and not stale, "ratio9d_3m": round(ratio, 3),
+            "as_of": str(as_of.date()), "age_days": age, "stale": stale}
 
 
 def load_macro_exog() -> dict[str, pd.Series]:

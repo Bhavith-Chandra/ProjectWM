@@ -278,3 +278,28 @@ not more features. Ranked levers:
 ~7–10% lever on the index ETFs that *have* a free vol index. It is **not available for single stocks**
 (no free per-asset implied vol), so those honestly stay on price-only HAR — the boundary the engine
 surfaces in every thesis rather than papering over with a generic VIX.
+
+---
+
+## Crisis-risk upgrades — deep-research corroboration (pass `wlbzkb0a9`, 102 agents, adversarially verified)
+
+A 102-agent fan-out + fact-check on the three review-proposed upgrades. It **independently confirms all
+three empirical results** obtained in-code (`REVIEW_RESPONSE.md`), and adds one actionable refinement.
+
+1. **IV/RV early-warning gate — ranked #1, lowest-overfitting (shipped).** Implied vol genuinely leads
+   realized-vol regime shifts; a risk-premium-adjusted short-horizon IV proxy beats HAR out-of-sample
+   under Diebold-Mariano (Albers 2025, *J. Futures Markets*), while a backward HMM/percentile labeler
+   lags by construction (Cavicchioli 2025; Ding et al.). Matches our shipped `term_structure_warning`.
+   **Refinement:** raw IV *overestimates* next-day RV (~36% for VIX1D, 2022-24) via the variance risk
+   premium — so gate on the **term-structure ratio / de-biased IV-RV**, NOT the raw VIX level. We already
+   gate on VIX9D/VIX3M (a ratio), which sidesteps the premium bias; noted for any future raw-IV use.
+2. **Threshold/regime shock propagation — highest OOS-overfitting risk.** Correlations do gap toward 1 in
+   bear markets (Ang-Chen 2002; Longin-Solnik 2001) and the *trigger* should be a downside market-RETURN
+   boundary (Taamouti-Tsafack: controlling for return, volatility's effect on correlation vanishes) — but
+   regime-switching models "reliably win in-sample and are usually beaten out-of-sample" (Cavicchioli
+   2025; Ding et al.: no daily-RV edge), with very few stress observations. Matches our two null results
+   (`reflexive_validate.py`, `validate_network.py`): kept diagnostic-only.
+3. **Cornish-Fisher — do NOT replace EVT-GPD at 99%.** CF goes non-monotone/unreliable at the high
+   skew-kurtosis where deep-tail risk lives (Maillard domain-of-validity); GARCH-EVT beats
+   normal/moment methods OOS (McNeil-Frey reject conditional-normal p=0.00 at 0.995). Matches
+   `cf_vs_evt.py` (EVT 1.18% vs CF 1.30% breach; CF non-monotone 9%). CF stays unused.

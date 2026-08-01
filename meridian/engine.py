@@ -239,15 +239,33 @@ def _tail(ret: pd.Series, sigma_now: float, q=0.99):
     z = r / (sd + EPS)
     L = -z; u = np.quantile(L, 0.90); exc = L[L > u] - u; Nu = len(exc); n = len(L)
     daily_sig = sigma_now / np.sqrt(TRADING_DAYS)           # today's 1-day sigma
+    vq = es = None
     if Nu >= 30:
-        xi, _, beta = stats.genpareto.fit(exc, floc=0); xi = float(np.clip(xi, -0.4, 0.9))
-        if abs(xi) > 1e-4:
-            vq = u + (beta / xi) * (((n / Nu) * (1 - q)) ** (-xi) - 1)
-        else:
-            vq = u + beta * np.log((n / Nu) / (1 - q))
-        es = vq / (1 - xi) + (beta - xi * u) / (1 - xi) if xi < 1 else vq * 1.5
-    else:
+        # GUARDRAIL: scipy's GPD MLE can fail to converge or return degenerate/non-finite params on a
+        # thin or near-degenerate exceedance set. Wrap it; on any failure or bad fit, fall through to the
+        # robust empirical-quantile branch rather than crash the risk print (the moment the desk needs it).
+        try:
+            xi, _, beta = stats.genpareto.fit(exc, floc=0)
+            xi = float(np.clip(xi, -0.4, 0.9)); beta = float(beta)
+            if np.isfinite(xi) and np.isfinite(beta) and beta > 1e-9:
+                if abs(xi) > 1e-4:
+                    vq = u + (beta / xi) * (((n / Nu) * (1 - q)) ** (-xi) - 1)
+                else:
+                    vq = u + beta * np.log((n / Nu) / (1 - q))
+                es = vq / (1 - xi) + (beta - xi * u) / (1 - xi) if xi < 1 else vq * 1.5
+                if not (np.isfinite(vq) and np.isfinite(es) and vq > 0):
+                    vq = es = None                          # degenerate → use fallback
+        except Exception:
+            vq = es = None
+    if vq is None:                                          # robust fallback: empirical tail quantile
         vq = -np.quantile(z, 1 - q); es = vq * 1.3
+    # ABSOLUTE FLOOR (review #3): a deep-quiet window can compress the standardized quantile below even
+    # the Gaussian value — a 99% tail must never be thinner than normal. Floor to norm.ppf(q) so VaR
+    # can't collapse to ~0 right before a regime shift; real fat tails still lift it above the floor.
+    z_floor = float(stats.norm.ppf(q))
+    if not np.isfinite(vq) or vq < z_floor:
+        vq = z_floor
+        es = max(es if es is not None and np.isfinite(es) else 0.0, vq * 1.15)
     return float(-daily_sig * vq), float(-daily_sig * es)   # signed (negative = loss)
 
 
