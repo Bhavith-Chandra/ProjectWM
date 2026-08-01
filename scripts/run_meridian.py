@@ -118,6 +118,9 @@ def main():
         cfg.lambda_sig = float(os.environ["MERIDIAN_LSIG"])
     cfg.dual_vol = os.environ.get("MERIDIAN_DUALVOL", "") == "1"
     cfg.core_type = os.environ.get("MERIDIAN_CORE", "ssm")
+    cfg.energy_mode = os.environ.get("MERIDIAN_ENERGY", "l2")     # "l2" | "learned" (EB-JEPA)
+    if "MERIDIAN_LENERGY" in os.environ:
+        cfg.lambda_energy = float(os.environ["MERIDIAN_LENERGY"])
     print(f"loss_mode={LOSS_MODE}  ensemble={ENSEMBLE}  holdout={sorted(HOLDOUT) or 'none'}  "
           f"lambda_jepa={cfg.lambda_jepa}  lambda_sig={cfg.lambda_sig}  out={OUT_NAME}", flush=True)
     records = []

@@ -42,6 +42,8 @@ class MeridianConfig:
     loss_mode: str = "mse"     # "mse" (head=E[log RV]) or "qlike" (head=log variance)
     dual_vol: bool = False     # CF-JEPA test: 2nd vol head reads the EMA target encoder
     core_type: str = "ssm"     # "ssm" (DiagonalSSM) or "ode" (Neural-ODE / ODE-RNN)
+    energy_mode: str = "l2"    # "l2" = fixed latent-MSE energy; "learned" = EB-JEPA learned energy head
+    lambda_energy: float = 0.2 # weight of the EB-JEPA contrastive energy objective
 
 
 # --------------------------------------------------------------------------- #
@@ -108,6 +110,39 @@ class Predictor(nn.Module):
         return self.net(h)
 
 
+class EnergyHead(nn.Module):
+    """EB-JEPA LEARNED energy E_φ(ẑ, z): a scalar energy over the (predicted, target) latent pair,
+    replacing the fixed L2 distance. Low energy = "this target is the true future of this prediction".
+    Trained non-parametrically-free via an in-batch contrastive objective (the true pair is the positive;
+    other samples' futures are negatives), which prevents the energy from collapsing to a constant."""
+
+    def __init__(self, d_model: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(4 * d_model, d_model), nn.GELU(),
+            nn.Linear(d_model, d_model // 2), nn.GELU(),
+            nn.Linear(d_model // 2, 1),
+        )
+
+    def pair_features(self, zp, zt):
+        # symmetric interaction features so the energy sees agreement, disagreement and magnitude
+        return torch.cat([zp, zt, zp * zt, (zp - zt) ** 2], dim=-1)
+
+    def energy(self, zp, zt):
+        return self.net(self.pair_features(zp, zt)).squeeze(-1)   # per-pair scalar energy
+
+    def contrastive(self, zp, zt):
+        """In-batch contrastive energy: E(zp_i, zt_j) for all j; the positive is j=i.
+        Returns (loss, per_sample_energy) where per_sample_energy = E(zp_i, zt_i) (the surprise)."""
+        B = zp.shape[0]
+        zp_e = zp.unsqueeze(1).expand(B, B, -1)                   # [B,B,d]
+        zt_e = zt.unsqueeze(0).expand(B, B, -1)
+        E = self.net(self.pair_features(zp_e, zt_e)).squeeze(-1)  # [B,B] energy of every pair
+        # cross-entropy: the true future (diagonal) should have the LOWEST energy in its row
+        loss = F.cross_entropy(-E, torch.arange(B, device=zp.device))
+        return loss, E.diagonal()
+
+
 # --------------------------------------------------------------------------- #
 def sigreg_loss(z: torch.Tensor, n_proj: int = 64) -> torch.Tensor:
     """Sketched Isotropic Gaussian Regularization (LeJEPA-style, practical form).
@@ -142,6 +177,7 @@ class Meridian(nn.Module):
         for p in self.target_encoder.parameters():
             p.requires_grad_(False)
         self.predictor = Predictor(cfg.d_model)
+        self.energy_head = EnergyHead(cfg.d_model) if cfg.energy_mode == "learned" else None
         self.vol_head = nn.Sequential(
             nn.Linear(cfg.d_model, cfg.d_model), nn.GELU(),
             nn.Linear(cfg.d_model, 1),
@@ -187,7 +223,10 @@ class Meridian(nn.Module):
             z_pred = self.predictor(h_t)                 # predicted future embedding
             with torch.no_grad():
                 z_tgt = self.target_encoder(x_fut)[:, -1]
-            energy = (z_pred - z_tgt).pow(2).mean(-1)    # per-sample surprise
+            if self.energy_head is not None:             # EB-JEPA: learned energy as the surprise score
+                energy = self.energy_head.energy(z_pred, z_tgt)
+            else:                                        # fixed latent-MSE energy
+                energy = (z_pred - z_tgt).pow(2).mean(-1)
             out.update({"z_pred": z_pred, "z_tgt": z_tgt, "energy": energy})
         return out
 
@@ -205,11 +244,21 @@ class Meridian(nn.Module):
             return F.mse_loss(f, y)          # f is E[log RV]
 
         vol_loss = vol_objective(out["vol"])
-        jepa_loss = out["energy"].mean()
         sig = sigreg_loss(out["h"])
-        total = vol_loss + cfg.lambda_jepa * jepa_loss + cfg.lambda_sig * sig
-        logs = {"total": float(total), "vol": float(vol_loss),
-                "jepa": float(jepa_loss), "sig": float(sig)}
+        if self.energy_head is not None:
+            # EB-JEPA: the JEPA term is the in-batch CONTRASTIVE energy (learned energy, no collapse);
+            # the predictor still gets an L2 pull toward the target to keep the latent aligned.
+            energy_loss, _ = self.energy_head.contrastive(out["z_pred"], out["z_tgt"])
+            align = (out["z_pred"] - out["z_tgt"]).pow(2).mean()
+            jepa_loss = align
+            total = vol_loss + cfg.lambda_jepa * align + cfg.lambda_energy * energy_loss + cfg.lambda_sig * sig
+            logs = {"total": float(total), "vol": float(vol_loss), "jepa": float(align),
+                    "energy": float(energy_loss), "sig": float(sig)}
+        else:
+            jepa_loss = out["energy"].mean()
+            total = vol_loss + cfg.lambda_jepa * jepa_loss + cfg.lambda_sig * sig
+            logs = {"total": float(total), "vol": float(vol_loss),
+                    "jepa": float(jepa_loss), "sig": float(sig)}
         if cfg.dual_vol:
             vol_loss_tgt = vol_objective(out["vol_tgt"])
             total = total + vol_loss_tgt     # trains the target-readout head only
