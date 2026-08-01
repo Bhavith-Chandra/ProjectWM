@@ -1,0 +1,26 @@
+{
+  "equal-weight (naive)": {
+    "ann_vol_pct": 13.456651528414604,
+    "ann_ret_pct": 7.7533347425774,
+    "sharpe": 0.5761711721960405,
+    "maxDD_pct": -35.97818174413463
+  },
+  "inverse-vol": {
+    "ann_vol_pct": 11.224631811203874,
+    "ann_ret_pct": 7.430242424551264,
+    "sharpe": 0.6619586711912364,
+    "maxDD_pct": -29.87285491960755
+  },
+  "min-var (sample)": {
+    "ann_vol_pct": 6.218176110233719,
+    "ann_ret_pct": 3.6358539505547336,
+    "sharpe": 0.5847138819531901,
+    "maxDD_pct": -19.253164279297565
+  },
+  "min-var (Ledoit-Wolf) \u2014 Meridian": {
+    "ann_vol_pct": 6.807304603032289,
+    "ann_ret_pct": 4.853260499150465,
+    "sharpe": 0.712948914566524,
+    "maxDD_pct": -20.10777490030916
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "Gaussian (naive)": {
+    "exceed_pct": 0.9592979555021046,
+    "kupiec_p": 0.1790560294759247,
+    "christoffersen_p": 0.0,
+    "verdict": "well-calibrated"
+  },
+  "Historical": {
+    "exceed_pct": 0.57501503307276,
+    "kupiec_p": 0.0,
+    "christoffersen_p": 0.0,
+    "verdict": "miscalibrated"
+  },
+  "EVT \u2014 Meridian": {
+    "exceed_pct": 0.9968806374022852,
+    "kupiec_p": 0.9184937822764987,
+    "christoffersen_p": 0.0,
+    "verdict": "well-calibrated"
+  }
+}

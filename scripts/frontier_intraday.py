@@ -124,6 +124,18 @@ def main():
     mcs = MCS(LM, size=0.10, reps=1000, block_size=22, method="R", seed=0); mcs.compute()
     print(f"\n  MCS 90%: {sorted(mcs.included)}")
     print("  DMvsMer-lin<0.05 ⇒ the intraday-rich model significantly beats the current Meridian.")
+    # save for the master comparison
+    import json
+    out = {"n_forecasts": int(len(P)), "n_indices": int(P["asset"].nunique()), "models": {}}
+    for m in LADDER:
+        q = float(np.nanmean(loss[m]))
+        out["models"][m] = {"QLIKE": q, "RMSE_log": float(np.sqrt(np.nanmean((y - P[m].to_numpy()) ** 2))),
+                            "MZ_R2": float(mz_r2(y, P[m].to_numpy())),
+                            "IC": float(spearmanr(np.sqrt(P[m + "__v"].to_numpy()), np.sqrt(rv_true))[0]),
+                            "R2_vs_HAR_pct": float((1 - q / qh) * 100),
+                            "DM_vs_HAR_p": None if m == "HAR" else float(diebold_mariano(loss[m], loss["HAR"])[1]),
+                            "in_mcs": m in mcs.included}
+    (Path(__file__).resolve().parent.parent / "results" / "frontier_omi.json").write_text(json.dumps(out, indent=2))
 
 
 if __name__ == "__main__":

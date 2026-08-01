@@ -57,12 +57,15 @@ def portfolio_bench(d):
             strat[k].append(w[k] @ R[t])
     print(f"A. PORTFOLIO RISK — OOS {dates[win].date()}→{dates[-1].date()}, {N} held-out assets, monthly rebalance\n")
     print(f"  {'strategy':>34} {'ann vol':>9} {'ann ret':>9} {'Sharpe':>8} {'maxDD':>8}")
-    ewv = None
+    ewv = None; res = {}
     for k in strat:
         p = np.array(strat[k]); vol = p.std() * np.sqrt(ANN); ann = p.mean() * ANN
         sharpe = ann / (vol + 1e-9); cum = np.cumprod(1 + p); dd = (cum / np.maximum.accumulate(cum) - 1).min()
         if "equal" in k: ewv = vol
+        res[k] = {"ann_vol_pct": vol * 100, "ann_ret_pct": ann * 100, "sharpe": sharpe, "maxDD_pct": dd * 100}
         print(f"  {k:>34} {vol*100:>7.1f}% {ann*100:>+7.1f}% {sharpe:>8.2f} {dd*100:>7.1f}%")
+    import json
+    (Path(__file__).resolve().parent.parent / "results" / "risk_portfolio.json").write_text(json.dumps(res, indent=2))
     mvv = np.array(strat["min-var (Ledoit-Wolf) — Meridian"]).std() * np.sqrt(ANN)
     print(f"\n  → Meridian min-var cuts realized risk {(1-mvv/ewv)*100:.0f}% vs the naive equal-weight portfolio;")
     print(f"    matches sample-cov min-var (the sophisticated baseline). Honest: big margin vs naive, tie vs best.")
@@ -128,12 +131,17 @@ def tail_bench(d):
                 agg[m].append(r[t] < var)
     print("\nB. TAIL RISK — 99% VaR backtest, OOS pooled across held-out assets (target exceedance 1.0%)\n")
     print(f"  {'method':>20} {'exceed%':>8} {'Kupiec p':>9} {'Christoff p':>12} {'verdict':>26}")
+    res = {}
     for m in agg:
         v = np.array(agg[m]); ex = v.mean() * 100
         kp = kupiec(v, 1 - Q); cp = christoffersen(v)
         ok = (0.5 < ex < 1.8) and (kp > 0.05 if np.isfinite(kp) else False)
         verdict = "well-calibrated" if ok else ("too many breaches (risky)" if ex > 1.8 else "miscalibrated")
+        res[m] = {"exceed_pct": ex, "kupiec_p": None if not np.isfinite(kp) else float(kp),
+                  "christoffersen_p": None if not np.isfinite(cp) else float(cp), "verdict": verdict}
         print(f"  {m:>20} {ex:>7.2f}% {kp:>9.3f} {cp:>12.3f} {verdict:>26}")
+    import json
+    (Path(__file__).resolve().parent.parent / "results" / "risk_tail.json").write_text(json.dumps(res, indent=2))
     print("\n  HONEST read: at 99% VaR, EVT gives the most EXACT coverage (1.00% vs 1.0% target,")
     print("  best Kupiec p); Gaussian is also acceptable on coverage here; Historical is too")
     print("  conservative. All three FAIL the independence test (breaches cluster) — a limit of")
