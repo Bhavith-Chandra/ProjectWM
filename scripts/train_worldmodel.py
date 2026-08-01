@@ -103,14 +103,18 @@ def main():
     print(f"\n[2] SCENARIO VaR (1-day 99%, {len(viol)} OOS days): breach {ex:.2f}% (target 1.0%) → "
           f"{'calibrated' if 0.4 < ex < 2.0 else 'off'}")
 
-    # ---- 3. WHAT-IF: shock the dominant latent factor, roll out ----
-    def shock(z, tstep):
-        if tstep == 0:
-            z = z.clone(); z[:, 0] = z[:, 0] + 3.0          # +3σ jolt to latent dim 0 at t=0
-        return z
+    # ---- 2b. AGGREGATIONAL GAUSSIANITY: daily fat tails must become ~Gaussian monthly ----
+    real_mo = pd.Series(real_m).rolling(21).sum().dropna()
+    sim_mo = pd.Series(sim_m).rolling(21).sum().dropna()
+    print(f"\n[2b] AGGREGATIONAL GAUSSIANITY (excess kurtosis, should fall daily→monthly toward 0):")
+    print(f"     REAL  daily {pd.Series(real_m).kurt():>5.2f} → monthly {real_mo.kurt():>5.2f}   "
+          f"WorldModel  daily {pd.Series(sim_m).kurt():>5.2f} → monthly {sim_mo.kurt():>5.2f}")
+
+    # ---- 3. WHAT-IF: STRUCTURAL do-hook — shock the exogenous channel u_t (rate/credit-shock-like) ----
     base = wm.rollout(z0.cpu(), steps=5, n_paths=400).mean((0, 1)).numpy() / SCALE
-    shk = wm.rollout(z0.cpu(), steps=5, n_paths=400, intervene=shock).mean((0, 1)).numpy() / SCALE
-    print("\n[3] WHAT-IF (shock latent factor +3σ) — mean 5-day response by asset (bps):")
+    shk = wm.rollout(z0.cpu(), steps=5, n_paths=400,
+                     u_shock=lambda t: [3.0, 0, 0, 0] if t == 0 else [0, 0, 0, 0]).mean((0, 1)).numpy() / SCALE
+    print("\n[3] WHAT-IF (structural u-shock at t=0) — mean 5-day response by asset (bps):")
     for a, b, s in sorted(zip(ASSETS, base, shk), key=lambda x: x[2]):
         print(f"    {a:>5}  {(s-b)*1e4:>+7.1f} bps", end="")
     print("\n\n  Verdict: if the SIMULATION reproduces fat tails + vol clustering (vs iid-Gauss) and the")
