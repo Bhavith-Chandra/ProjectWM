@@ -68,6 +68,23 @@ learned energy; a non-contrastive regularized EB-JEPA energy is a separate, lowe
 same principle predicts it is unlikely to beat direct prediction-error for a surprise score.) The L2
 energy stays the production surprise signal.
 
+
+## Energy-as-regime vs HMM — tested, does NOT beat the baseline (`energy_vs_hmm.py`)
+
+The pre-registered claim: do JEPA-energy regimes beat a Gaussian HMM (persistence + economic value)?
+
+| Regime detector | dwell (days) | econ QLIKE % |
+|---|---|---|
+| HMM on returns | 9.10 | −39.8 |
+| JEPA energy | 7.86 (−13.6%, fails +10% bar) | −33.9 |
+| belief state | 344 (degenerate) | −45.7 |
+
+**Verdict: NOT met.** The energy is *less* persistent than the HMM — because surprise is spiky, not
+sticky. This is not a failure of the signal; it is the signal's nature: the energy is a genuine
+transient **surprise / early-warning spike** detector (4.4× vol lift, ~6-day lead), which is a different
+and complementary tool from a persistent regime label. Use the HMM for sticky regimes, the energy for
+spikes. The pre-registered regime-vs-HMM claim remains unmet by every learned detector tried.
+
 ## Research roadmap (from the JEPA-variants deep-research pass, ranked by plausible lift)
 
 The neural core is the substrate for genuine world-model research. Evidence-ranked next steps:
