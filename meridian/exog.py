@@ -36,15 +36,41 @@ MATCH = {
 FRED_EXOG = {"hy_oas": "BAMLH0A0HYM2", "nfci": "NFCI"}   # high-yield OAS, financial-conditions
 
 
+_IV_MEMO: dict | None = None
+
+
 def load_iv(refresh: bool = False) -> dict[str, pd.Series]:
-    """{name: implied-vol series (level, %)} from Yahoo; skips any unavailable."""
+    """{name: implied-vol series (level, %)} from Yahoo; skips any unavailable.
+    Memoized per-process so repeated analyze() calls don't refetch the family."""
+    global _IV_MEMO
+    if _IV_MEMO is not None and not refresh:
+        return _IV_MEMO
     out = {}
     for name, sym in IV_INDEX.items():
         try:
             out[name] = fetch_yahoo(sym)["close"].rename(name)
         except Exception:
             pass
+    _IV_MEMO = out
     return out
+
+
+def term_structure_warning(iv: dict | None = None) -> dict:
+    """VIX term-structure inversion early-warning (validated in scripts/iv_earlywarning.py):
+    VIX9D/VIX3M > 1 (near-term fear exceeding medium-term) LEADS realized-vol stress onset by a median
+    ~6 trading days, catching 70% of onsets with 52% precision vs a 13% base rate. Returns the latest
+    signal state. Market-wide (US equity vol), so informative for equity-linked assets."""
+    iv = iv if iv is not None else load_iv()
+    v9d, v3m = iv.get("VIX9D"), iv.get("VIX3M")
+    if v9d is None or v3m is None or not len(v9d) or not len(v3m):
+        return {"available": False}
+    a = v9d.dropna(); b = v3m.dropna()
+    idx = a.index.intersection(b.index)
+    if not len(idx):
+        return {"available": False}
+    ratio = float(a.reindex(idx).iloc[-1] / b.reindex(idx).iloc[-1])
+    return {"available": True, "inverted": ratio > 1.0, "ratio9d_3m": round(ratio, 3),
+            "as_of": str(idx[-1].date())}
 
 
 def load_macro_exog() -> dict[str, pd.Series]:

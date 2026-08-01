@@ -84,8 +84,17 @@ def build(prices=None, macro=None):
             WlogA.append(lrv[t - L + 1:t + 1]); WlevA.append(neg[t - L + 1:t + 1])
     R = pd.DataFrame(rows, columns=["asset", "date", "rv", "y", "har_d", "har_w", "har_m",
                                     "lev", "pos", "vix", "ret5", "rv_next"])
-    # common market-RV factor: cross-sectional mean of daily log-RV (known at close t, causal)
-    R["mktrv"] = R.groupby("date")["har_d"].transform("mean")
+    # common market-RV factor: cross-sectional mean of daily log-RV. STRICT 1-day lag (prior-close
+    # info only) — leakage-proof; proven OOS-equivalent to contemporaneous in scripts/leakage_mktrv_test.py
+    # (+0.56% vs +0.54%). MERIDIAN_MKT_LAG=0 restores the contemporaneous form. Rows stay in append order
+    # (contiguous per-asset) so R remains positionally aligned with the Wlog/Wlev window arrays.
+    _mlag = int(os.environ.get("MERIDIAN_MKT_LAG", "1"))
+    xmean = R.groupby("date")["har_d"].transform("mean")          # index-aligned to R
+    if _mlag:
+        lagged = xmean.groupby(R["asset"]).shift(_mlag)          # shift within asset; preserves index/order
+        R["mktrv"] = lagged.groupby(R["asset"]).bfill()          # backfill only the 1 leading NaN per asset
+    else:
+        R["mktrv"] = xmean
     return R, np.asarray(WlogA, np.float32), np.asarray(WlevA, np.float32), {"prices": prices, "macro": macro}
 
 
@@ -157,7 +166,12 @@ def build_omi():
             WlogA.append(lrv[t - L + 1:t + 1]); WlevA.append(neg[t - L + 1:t + 1])
     R = pd.DataFrame(rows, columns=["asset", "date", "rv", "y", "har_d", "har_w", "har_m",
                                     "lev", "pos", "vix", "ret5", "rv_next"])
-    R["mktrv"] = R.groupby("date")["har_d"].transform("mean")
+    _mlag = int(os.environ.get("MERIDIAN_MKT_LAG", "1"))         # strict-lag factor (see build())
+    xmean = R.groupby("date")["har_d"].transform("mean")
+    if _mlag:
+        R["mktrv"] = xmean.groupby(R["asset"]).shift(_mlag).groupby(R["asset"]).bfill()
+    else:
+        R["mktrv"] = xmean
     return R, np.asarray(WlogA, np.float32), np.asarray(WlevA, np.float32), {"prices": d, "macro": None}
 
 

@@ -110,6 +110,7 @@ class Analysis:
     corr_mkt: float
     data_quality_ok: bool = True
     forecast_model: str = "HAR-lev"   # "HAR-lev+IV" when a matched implied-vol index augments it
+    iv_early_warning: dict = field(default_factory=dict)   # VIX term-structure inversion (leading stress flag)
     notes: list = field(default_factory=list)
 
 
@@ -301,6 +302,11 @@ def analyze(query: str, market: pd.Series | None = None) -> Analysis | dict:
     dd = float(px.iloc[-1] / px.cummax().iloc[-1] - 1.0)
     ret_1m = float(px.iloc[-1] / px.iloc[-22] - 1.0) if len(px) > 22 else np.nan
     ret_12m = float(px.iloc[-1] / px.iloc[-252] - 1.0) if len(px) > 252 else np.nan
+    try:                                                   # market-wide leading stress flag (validated)
+        from meridian import exog
+        warn = exog.term_structure_warning()
+    except Exception:
+        warn = {}
 
     return Analysis(
         query=query, resolved=r, n_days=len(ohlc),
@@ -308,7 +314,7 @@ def analyze(query: str, market: pd.Series | None = None) -> Analysis | dict:
         vol_now_ann=vol_now, vol_fc_1d_ann=vol1, vol_fc_5d_ann=vol5, vol_pct=pct,
         regime=regime, regime_note=rnote, ret_1m=ret_1m, ret_12m=ret_12m, drawdown=dd,
         var99=var99, es99=es99, beta_mkt=beta, corr_mkt=corr, data_quality_ok=not dq,
-        forecast_model=fmodel,
+        forecast_model=fmodel, iv_early_warning=warn,
     )
 
 

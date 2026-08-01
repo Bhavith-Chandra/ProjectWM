@@ -51,6 +51,22 @@ def har_features(rv: pd.Series) -> pd.DataFrame:
     return f
 
 
+def market_rv_factor(log_rv_wide: pd.DataFrame, lag: int = 1) -> pd.Series:
+    """Common market-RV factor (Bollerslev "Risk Everywhere") — cross-sectional mean of log-RV.
+
+    `log_rv_wide` is (dates × assets) of log realized variance. Returns a per-date factor.
+
+    LEAKAGE NOTE (external review #4, settled empirically in scripts/leakage_mktrv_test.py):
+    the same-day cross-sectional mean is *contemporaneous* (all values known at close t) — it is
+    NOT lookahead. The strict-lag test confirmed the OOS edge is identical whether the factor is
+    contemporaneous (+0.54% over HAR) or lagged one day (+0.56%), both DM-significant. We nonetheless
+    default to `lag=1` (strictly prior-close info only) as defensive hygiene: it removes any doubt at
+    zero cost, since the two are provably equivalent for this factor. Set lag=0 for the contemporaneous
+    form used in the original benchmarks."""
+    f = log_rv_wide.mean(axis=1)
+    return (f.shift(lag) if lag else f).rename("mktrv")
+
+
 def build_asset_frame(ohlc: pd.DataFrame, macro: pd.DataFrame | None = None) -> pd.DataFrame:
     """Full per-asset modeling frame with features (t) and target (t+1).
 

@@ -53,7 +53,7 @@ def full_analysis(entity: str, conn: connect.Connection | None = None,
                           "forecast_1d_ann_pct": round(a.vol_fc_1d_ann * 100, 1),
                           "forecast_1w_ann_pct": round(a.vol_fc_5d_ann * 100, 1),
                           "percentile": round(a.vol_pct * 100)},
-           "forecast_model": a.forecast_model,
+           "forecast_model": a.forecast_model, "iv_early_warning": a.iv_early_warning,
            "regime": a.regime, "market_beta": None if not np.isfinite(a.beta_mkt) else round(a.beta_mkt, 2),
            "tail_1d": {"var99_pct": round(a.var99 * 100, 1), "es99_pct": round(a.es99 * 100, 1)},
            "monte_carlo": {k: round(v, 1) for k, v in mc.items()},
@@ -80,6 +80,11 @@ def _thesis(o: dict) -> str:
          f"over {mc['horizon_days']} days, {mc['prob_loss_gt_10pct']:.1f}% probability of a >10% drawdown.",
          f"- **Context:** {t['ret_1m_pct']:+.1f}% past month, {t['drawdown_pct']:+.1f}% from its high"
          + (f"; market beta {o['market_beta']}." if o['market_beta'] is not None else "."),
+         *( [f"- **⚠ Early-warning:** VIX term structure is **inverted** "
+             f"(VIX9D/VIX3M = {o['iv_early_warning'].get('ratio9d_3m')}) — the market is pricing "
+             f"near-term stress. This signal leads realized-vol stress onset by a median ~6 trading "
+             f"days (70% of onsets, 52% precision; scripts/iv_earlywarning.py)."]
+            if o.get("iv_early_warning", {}).get("inverted") else [] ),
          ("- **Forecaster:** implied-vol-augmented HAR (matched IV family + VIX term structure) — "
           "the +10.3%-over-HAR model validated OOS (DM p<0.001)."
           if o.get("forecast_model") == "HAR-lev+IV" else
