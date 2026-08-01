@@ -87,14 +87,19 @@ spikes. The pre-registered regime-vs-HMM claim remains unmet by every learned de
 
 ## Research roadmap (from the JEPA-variants deep-research pass, ranked by plausible lift)
 
-The neural core is the substrate for genuine world-model research. Evidence-ranked next steps:
-1. **EB-JEPA energy formulation** (Meta FAIR) — replace the plain latent-MSE energy with a learned
-   energy function; ranked the top candidate to strengthen the surprise/regime signal.
-2. **Multi-timescale / hierarchical JEPA (H-JEPA)** — daily/weekly/monthly latent predictors (HAR is
-   itself multiscale); test whether hierarchy improves the representation and the energy's regime lead.
-3. **Energy-as-regime trigger vs HMM** — formalize the +0.25 surprise correlation into a regime detector
-   and test economic value vs a Gaussian HMM (the one pre-registered claim not yet met).
-4. **Latent-space world-model calibration** — the emission-side tail experiment (`WORLDMODEL_CORE.md`).
+The neural core is the substrate for genuine world-model research. Status of the ranked items:
+1. ~~**EB-JEPA learned energy**~~ — **TESTED, REJECTED** (see above): the learned contrastive energy is
+   worse than L2 for surprise; discrimination ≠ surprise.
+2. **Multi-timescale / hierarchical JEPA (H-JEPA)** — daily/weekly/monthly latent predictors — untested;
+   lower priority given the horizon-edge decay already measured (`horizon_iv_edge.py`).
+3. ~~**Energy-as-regime trigger vs HMM**~~ — **TESTED, NOT MET** (see above): the energy is spiky, not
+   sticky; it does not beat the HMM as a persistent regime label.
+4. **Latent-space world-model calibration** — the emission-side tail experiment (`WORLDMODEL_CORE.md`) —
+   untested; the architecture already delegates the calibrated tail to EVT-GPD, so low expected value.
 
-Each will be built and **validated honestly** — reported by measured lift over the right baseline, with
-dead ends logged, exactly as the rest of Meridian.
+**What the DL research thread established.** The neural core delivers exactly ONE validated, durable win:
+the **L2 latent-prediction energy as a surprise / early-warning spike** (4.4× vol lift, ~6-day lead). Every
+attempt to make it fancier — a learned energy, a persistent regime label, a neural point-forecaster — lost
+to a simpler baseline (L2 energy, HMM, HAR respectively). For daily financial series the honest pattern is
+consistent: the simplest formulation that directly measures the target wins. Each result above was built
+and **validated honestly**, with dead ends logged — exactly as the rest of Meridian.
