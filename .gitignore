@@ -18,3 +18,4 @@ data/omi/
 
 # Kept intentionally: source (meridian/, scripts/), docs (*.md), demo/,
 # deliverables (results/*.html, *.jpg, *.png, *.json, *.csv), data/fred_*.csv
+*.pt
