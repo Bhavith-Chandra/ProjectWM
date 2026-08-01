@@ -63,10 +63,16 @@ def load_omi(refresh: bool = False) -> dict[str, pd.DataFrame]:
         rv = col("Realized Variance (5-minute)")
         rsv = col("Realized Semivariance (5-minute)")
         ret = col("Return")
+        rk = col("Realized Kernel")                          # noise-robust estimator
+        bv = col("Bipower Variation (5-minute)")             # continuous (jump-free) component
+        rvss = col("Realized Variance (5-minute using 1-minute subsamples)")  # subsampled (less noisy)
+        medrv = col("Median Truncated Realized Variance")    # jump-robust
         if rv is None or ret is None:
             continue
-        d = pd.DataFrame({"date": dates, "rv": rv.values,
-                          "rsv": (rsv.values if rsv is not None else np.nan), "ret": ret.values})
+        def vals(s):
+            return s.values if s is not None else np.full(len(dates), np.nan)
+        d = pd.DataFrame({"date": dates, "rv": rv.values, "rsv": vals(rsv), "ret": ret.values,
+                          "rk": vals(rk), "bv": vals(bv), "rvss": vals(rvss), "medrv": vals(medrv)})
         d = d.dropna(subset=["date", "rv"]).set_index("date").sort_index()
         d = d[d["rv"] > 0]
         if len(d) > 800:
