@@ -1,2 +1,2 @@
-neural_energy,neural_variogram,baseline_energy,baseline_variogram,energy_improvement_pct,variogram_improvement_pct,latent_rank,training_time_s,n_params,verdict
-1.7283790739378535,0.3524251662165188,1.7624251,0.35351485,1.9317695701264213,0.3082427577423531,0.96875,81.54252505302429,523232,DECISIVE WIN
+neural_energy,neural_variogram,baseline_energy,baseline_variogram,energy_improvement_pct,variogram_improvement_pct,energy_pvalue,variogram_pvalue,rssm_energy,rssm_variogram,latent_rank,training_time_s,n_params,verdict
+1.927236196280853,0.4849070141050779,1.9300133,0.48134813,0.14389034049376173,-0.7393582269922222,0.7965459601614201,0.731021253786125,,,0.5,275.71130204200745,523232,PARTIAL WIN
