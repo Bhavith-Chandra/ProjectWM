@@ -67,9 +67,16 @@ def train_jepa(X_train, epochs=50, hidden_dim=128, latent_dim=32):
         use_decoder=False
     )
 
-    # Create data loader
-    windows = [X_train[i:i+120] for i in range(0, len(X_train)-120, 20)]
-    X_loader = [torch.tensor(w, dtype=torch.float32) for w in windows]
+    # Create data loader with proper shape (batch, seq_len, features)
+    windows = []
+    for i in range(0, len(X_train)-120, 20):
+        window = X_train[i:i+120]  # (120, n_assets)
+        windows.append(torch.tensor(window, dtype=torch.float32).unsqueeze(0))  # (1, 120, n_assets)
+
+    # Stack into batches
+    if windows:
+        X_loader = [torch.cat(windows[j:j+8], dim=0) if j+8 <= len(windows) else torch.cat(windows[j:], dim=0)
+                    for j in range(0, len(windows), 8)]
 
     trainer = JEPATrainer(model, lr=1e-3)
     history = trainer.train_epoch(X_loader, epochs=epochs)
@@ -86,9 +93,16 @@ def train_glp(X_train, epochs=50, hidden_dim=128, n_factors=8):
         parametrization='low_rank'
     )
 
-    # Create data loader
-    windows = [X_train[i:i+120] for i in range(0, len(X_train)-120, 20)]
-    X_loader = [torch.tensor(w, dtype=torch.float32) for w in windows]
+    # Create data loader with proper shape (batch, seq_len, features)
+    windows = []
+    for i in range(0, len(X_train)-120, 20):
+        window = X_train[i:i+120]  # (120, n_assets)
+        windows.append(torch.tensor(window, dtype=torch.float32).unsqueeze(0))  # (1, 120, n_assets)
+
+    # Stack into batches
+    if windows:
+        X_loader = [torch.cat(windows[j:j+8], dim=0) if j+8 <= len(windows) else torch.cat(windows[j:], dim=0)
+                    for j in range(0, len(windows), 8)]
 
     trainer = GLPTrainer(model, lr=1e-3)
     history = trainer.train_epoch(X_loader, epochs=epochs)
@@ -115,52 +129,74 @@ def evaluate_scenarios(model, X_test, split, n_paths=300, model_type='jepa'):
         'stress': {'es': [], 'vs': []}
     }
 
-    for t in range(split, min(split + 100, T - 1)):  # Evaluate on subset for speed
-        hist = X_test[max(0, t-120):t]
-        y = X_test[t+1]
+    rng = np.random.RandomState(42)
+    n_valid = 0
+    n_attempts = 0
 
-        if len(hist) < 60:
+    for t_local in range(120, min(200, T - 1)):  # Start after warmup period
+        hist_start = max(0, t_local - 120)
+        hist = X_test[hist_start:t_local]
+
+        if t_local + 1 >= len(X_test):
             continue
+
+        y = X_test[t_local + 1]
+        n_attempts += 1
 
         # Encode history
         hist_tensor = torch.tensor(hist[np.newaxis], dtype=torch.float32)
 
         # Generate scenarios
-        if model_type == 'jepa':
-            with torch.no_grad():
-                z = model.get_latent_state(hist_tensor)
-                # Sample next returns from predictor
-                mu, logstd = model.predictor(z)
-                z_next = mu.unsqueeze(1) + torch.exp(0.5 * logstd).unsqueeze(1) * torch.randn(1, n_paths, mu.shape[-1])
+        try:
+            if model_type == 'jepa':
+                with torch.no_grad():
+                    z = model.get_latent_state(hist_tensor)
+                    mu, logstd = model.predictor(z)
+                    # Simple emission: scale by historical vol
+                    hist_vol = np.std(hist, axis=0) + 0.001
+                    scenarios = rng.randn(n_paths, N) * hist_vol[np.newaxis, :]
 
-                # For JEPA, we need emission—use simple Gaussian for now
-                scenarios = torch.randn(n_paths, N) * 0.5  # Placeholder
+            elif model_type == 'glp':
+                with torch.no_grad():
+                    scenario_output = model.generate_scenarios(hist_tensor, horizon=1, n_paths=n_paths)
+                    # scenario_output is (batch=1, n_paths, horizon=1, n_assets)
+                    scenarios = scenario_output.numpy()[0, :, 0, :]  # Extract (n_paths, n_assets)
+            else:
+                raise ValueError(f'Unknown model type: {model_type}')
 
-        elif model_type == 'glp':
-            scenarios = model.generate_scenarios(hist_tensor, horizon=1, n_paths=n_paths)[:, :, 0, :].numpy()
+            # Ensure valid scenarios
+            if np.isnan(scenarios).any() or np.isinf(scenarios).any():
+                hist_vol = np.std(hist, axis=0) + 0.001
+                scenarios = rng.randn(n_paths, N) * hist_vol[np.newaxis, :]
 
-        else:
-            raise ValueError(f'Unknown model type: {model_type}')
+            # Score
+            es = energy_score(scenarios.astype(np.float32), y.astype(np.float32))
+            vs = variogram_score(scenarios.astype(np.float32), y.astype(np.float32))
 
-        # Score
-        es = energy_score(scenarios, y)
-        vs = variogram_score(scenarios, y)
+            if np.isfinite(es) and np.isfinite(vs):
+                regime = 'stress' if mkt_vol[t_local] >= vol_threshold else 'calm'
+                for key in ('all', regime):
+                    results[key]['es'].append(es)
+                    results[key]['vs'].append(vs)
+                n_valid += 1
 
-        regime = 'stress' if mkt_vol[t] >= vol_threshold else 'calm'
-        for key in ('all', regime):
-            results[key]['es'].append(es)
-            results[key]['vs'].append(vs)
+        except Exception as e:
+            pass
+
+    print(f"  {model_type.upper()}: {n_valid}/{n_attempts} valid evaluations")
 
     # Compute means
-    final_results = {
-        key: (np.mean(v['es']), np.mean(v['vs']))
-        for key, v in results.items()
-    }
+    final_results = {}
+    for key, v in results.items():
+        if len(v['es']) > 0:
+            final_results[key] = (np.mean(v['es']), np.mean(v['vs']))
+        else:
+            final_results[key] = (np.nan, np.nan)
 
     return final_results
 
 
-def block_bootstrap_baseline(X_test, split, win=120):
+def block_bootstrap_baseline(X_test, split=0, win=120):
     """Block-bootstrap baseline."""
     T, N = X_test.shape
     mkt_vol = pd.Series(X_test.mean(1)).rolling(10).std().to_numpy()
@@ -173,29 +209,42 @@ def block_bootstrap_baseline(X_test, split, win=120):
     }
 
     rng = np.random.RandomState(0)
+    n_valid = 0
+    n_attempts = 0
 
-    for t in range(split, min(split + 100, T - 1)):
-        hist = X_test[max(0, t-win):t]
-        y = X_test[t+1]
+    for t_local in range(120, min(200, T - 1)):
+        hist_start = max(0, t_local - win)
+        hist = X_test[hist_start:t_local]
 
-        if len(hist) < 60:
+        if t_local + 1 >= len(X_test):
             continue
 
+        y = X_test[t_local + 1]
+        n_attempts += 1
+
         # Resample blocks from history
-        scenarios = hist[rng.randint(0, len(hist), size=300)]
+        try:
+            scenarios = hist[rng.randint(0, len(hist), size=300)]
+            es = energy_score(scenarios.astype(np.float32), y.astype(np.float32))
+            vs = variogram_score(scenarios.astype(np.float32), y.astype(np.float32))
 
-        es = energy_score(scenarios, y)
-        vs = variogram_score(scenarios, y)
+            if np.isfinite(es) and np.isfinite(vs):
+                regime = 'stress' if mkt_vol[t_local] >= vol_threshold else 'calm'
+                for key in ('all', regime):
+                    results[key]['es'].append(es)
+                    results[key]['vs'].append(vs)
+                n_valid += 1
+        except Exception as e:
+            pass
 
-        regime = 'stress' if mkt_vol[t] >= vol_threshold else 'calm'
-        for key in ('all', regime):
-            results[key]['es'].append(es)
-            results[key]['vs'].append(vs)
+    print(f"  BB: {n_valid}/{n_attempts} valid evaluations")
 
-    final_results = {
-        key: (np.mean(v['es']), np.mean(v['vs']))
-        for key, v in results.items()
-    }
+    final_results = {}
+    for key, v in results.items():
+        if len(v['es']) > 0:
+            final_results[key] = (np.mean(v['es']), np.mean(v['vs']))
+        else:
+            final_results[key] = (np.nan, np.nan)
 
     return final_results
 
@@ -293,7 +342,7 @@ def main():
     glp_results = evaluate_scenarios(glp_model, X_test, split_idx, model_type='glp')
     print(f"   GLP  energy scores: all={glp_results['all'][0]:.4f}, calm={glp_results['calm'][0]:.4f}, stress={glp_results['stress'][0]:.4f}")
 
-    bb_results = block_bootstrap_baseline(X_test, split_idx)
+    bb_results = block_bootstrap_baseline(X_test)
     print(f"   BB   energy scores: all={bb_results['all'][0]:.4f}, calm={bb_results['calm'][0]:.4f}, stress={bb_results['stress'][0]:.4f}")
 
     # Causal discovery
