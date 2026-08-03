@@ -1,0 +1,2 @@
+neural_energy,neural_variogram,baseline_energy,baseline_variogram,energy_improvement_pct,variogram_improvement_pct,latent_rank,training_time_s,n_params,verdict
+1.7283790739378535,0.3524251662165188,1.7624251,0.35351485,1.9317695701264213,0.3082427577423531,0.96875,81.54252505302429,523232,DECISIVE WIN

@@ -429,7 +429,7 @@ class FinJEPAWorldModel(nn.Module):
         )
 
         # Anti-collapse regularizer
-        self.sigreg = SIGRegLoss()
+        self.sigreg = SIGRegLoss(sim_weight=25.0, var_weight=35.0, cov_weight=1.0)
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor,
                 x_target: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
