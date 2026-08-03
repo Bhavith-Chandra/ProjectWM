@@ -412,57 +412,62 @@ def run():
     print(f"\n  vs Bootstrap:  Energy {e_bb:+.1f}%  Variogram {v_bb:+.1f}%")
     print(f"  vs GARCH-FHS:  Energy {e_gf:+.1f}%  Variogram {v_gf:+.1f}%")
 
-    # ── Phase 3b: Multi-day (5-day) scenario evaluation ────────────────────
-    print("\nPhase 3b: Multi-day (5-day cumulative) evaluation …")
-    HORIZON = 5
-    n_eval_5d = len(test_w) - HORIZON
-    neural_es5, bb_es5 = [], []
-    neural_vs5, bb_vs5 = [], []
-    rng5 = np.random.RandomState(42)
+    # ── Phase 3b: Multi-horizon scenario evaluation ────────────────────────
+    print("\nPhase 3b: Multi-horizon scenario evaluation …")
+    horizon_results = {}
 
-    for i in range(0, n_eval_5d, 2):  # stride 2 to save time
-        x_window = test_w[i]
-        # Actual 5-day cumulative return
-        cum_real = np.zeros(n_assets)
-        for d in range(HORIZON):
-            cum_real += test_w[i + 1 + d][:, -1]
+    for HORIZON in [5, 10, 20]:
+        n_eval_h = len(test_w) - HORIZON
+        neural_esh, bb_esh = [], []
+        neural_vsh, bb_vsh = [], []
+        rng_h = np.random.RandomState(42)
+        stride_h = max(2, HORIZON // 3)
 
-        gd = garch_cache[min(i, len(garch_cache) - 1)]
-        innovations, forecast_vols = gd
+        for i in range(0, n_eval_h, stride_h):
+            x_window = test_w[i]
+            cum_real = np.zeros(n_assets)
+            for d in range(HORIZON):
+                cum_real += test_w[i + 1 + d][:, -1]
 
-        # Neural: simulate 5-day paths by compounding daily scenarios
-        per_m = (N_PATHS + N_SEEDS - 1) // N_SEEDS
-        cum_neural = np.zeros((N_PATHS, n_assets))
-        for d in range(HORIZON):
-            parts = [generate_scenarios_neural(m, x_window, gd, per_m)
-                     for m in models]
-            daily = np.concatenate(parts)[:N_PATHS]
-            cum_neural += daily
+            gd = garch_cache[min(i, len(garch_cache) - 1)]
 
-        neural_es5.append(energy_score(cum_neural, cum_real))
-        neural_vs5.append(variogram_score(cum_neural, cum_real))
+            per_m = (N_PATHS + N_SEEDS - 1) // N_SEEDS
+            cum_neural = np.zeros((N_PATHS, n_assets))
+            for d in range(HORIZON):
+                parts = [generate_scenarios_neural(m, x_window, gd, per_m)
+                         for m in models]
+                cum_neural += np.concatenate(parts)[:N_PATHS]
 
-        # Bootstrap: 5-day by summing independent single-day resamples
-        hist_rows = x_window.T
-        cum_bb = np.zeros((N_PATHS, n_assets))
-        for d in range(HORIZON):
-            cum_bb += block_bootstrap_scenarios(hist_rows, N_PATHS, 5, rng5)
+            neural_esh.append(energy_score(cum_neural, cum_real))
+            neural_vsh.append(variogram_score(cum_neural, cum_real))
 
-        bb_es5.append(energy_score(cum_bb, cum_real))
-        bb_vs5.append(variogram_score(cum_bb, cum_real))
+            hist_rows = x_window.T
+            cum_bb = np.zeros((N_PATHS, n_assets))
+            for d in range(HORIZON):
+                cum_bb += block_bootstrap_scenarios(hist_rows, N_PATHS, 5, rng_h)
 
-    me5, mv5 = np.mean(neural_es5), np.mean(neural_vs5)
-    be5, bv5 = np.mean(bb_es5), np.mean(bb_vs5)
-    e5_imp = (be5 - me5) / be5 * 100
-    v5_imp = (bv5 - mv5) / bv5 * 100
+            bb_esh.append(energy_score(cum_bb, cum_real))
+            bb_vsh.append(variogram_score(cum_bb, cum_real))
 
-    t_e5, p_e5 = ttest_rel(bb_es5, neural_es5)
-    t_v5, p_v5 = ttest_rel(bb_vs5, neural_vs5)
+        meh, mvh = np.mean(neural_esh), np.mean(neural_vsh)
+        beh, bvh = np.mean(bb_esh), np.mean(bb_vsh)
+        eh_imp = (beh - meh) / beh * 100
+        vh_imp = (bvh - mvh) / bvh * 100
+        t_eh, p_eh = ttest_rel(bb_esh, neural_esh)
+        t_vh, p_vh = ttest_rel(bb_vsh, neural_vsh)
 
-    print(f"  5-day Neural: energy={me5:.4f}  variogram={mv5:.4f}")
-    print(f"  5-day BB:     energy={be5:.4f}  variogram={bv5:.4f}")
-    print(f"  Improvement:  Energy {e5_imp:+.1f}%  Variogram {v5_imp:+.1f}%")
-    print(f"  Significance: Energy p={p_e5:.4f}  Variogram p={p_v5:.4f}")
+        sig = '***' if p_eh < 0.001 else '**' if p_eh < 0.01 else '*' if p_eh < 0.05 else ''
+        print(f"  {HORIZON:2d}-day | Energy {eh_imp:+5.1f}% (p={p_eh:.4f}){sig:>4s}"
+              f" | Variogram {vh_imp:+5.1f}% (p={p_vh:.4f})")
+
+        horizon_results[HORIZON] = dict(
+            energy_pct=eh_imp, variogram_pct=vh_imp,
+            energy_p=p_eh, variogram_p=p_vh)
+
+    e5_imp = horizon_results[5]['energy_pct']
+    v5_imp = horizon_results[5]['variogram_pct']
+    p_e5 = horizon_results[5]['energy_p']
+    p_v5 = horizon_results[5]['variogram_p']
 
     # ── Anti-collapse ────────────────────────────────────────────────────────
     print("\nPhase 4: Anti-collapse …")
