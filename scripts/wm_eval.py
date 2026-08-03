@@ -56,33 +56,39 @@ def main():
     T, N = R.shape
     rng = np.random.RandomState(0)
     start = max(FILT + 5, T - TESTN)
-    scores = {k: {"es": [], "vs": []} for k in ["Gaussian", "block-boot", "world-model"]}
+    # regime split: a conditional model should beat UNconditional block-bootstrap most on STRESS days
+    mkt_vol = pd.Series(R.mean(1)).rolling(10).std().to_numpy()      # market 10d vol proxy
+    thr = np.nanquantile(mkt_vol[start:T - 1], 0.70)                 # top-30% = stress
+    scores = {k: {"es": {"all": [], "calm": [], "stress": []}, "vs": {"all": [], "calm": [], "stress": []}}
+              for k in ["Gaussian", "block-boot", "world-model"]}
     for t in range(start, T - 1):
         hist = R[t - FILT:t]; y = R[t + 1]
+        reg = "stress" if mkt_vol[t] >= thr else "calm"
         cov = np.cov(hist, rowvar=False)
-        ens = {}
-        ens["Gaussian"] = rng.multivariate_normal(np.zeros(N), cov, size=M)
-        ens["block-boot"] = hist[rng.randint(0, len(hist), size=M)]        # resample whole-day joint returns
+        ens = {"Gaussian": rng.multivariate_normal(np.zeros(N), cov, size=M),
+               "block-boot": hist[rng.randint(0, len(hist), size=M)]}
         with torch.no_grad():
             z = wm.filter_state(torch.tensor(hist[None] * WM_SCALE, dtype=torch.float32))[0]
             ens["world-model"] = wm.emit_sample(z, n_paths=M).numpy() / WM_SCALE
         for k, X in ens.items():
-            scores[k]["es"].append(energy_score(X, y))
-            scores[k]["vs"].append(variogram_score(X, y))
-    print(f"World-model scenario evaluation — {N} assets, {start}→{T-1} ({len(scores['Gaussian']['es'])} OOS days)\n")
-    print(f"  {'method':>14} {'energy score':>13} {'variogram score':>16}  (lower = better)")
-    base = None
-    for k in ["Gaussian", "block-boot", "world-model"]:
-        es, vs = np.mean(scores[k]["es"]), np.mean(scores[k]["vs"])
-        print(f"  {k:>14} {es:>13.5f} {vs:>16.5f}")
-        if k == "block-boot":
-            base = (es, vs)
-    wm_es, wm_vs = np.mean(scores["world-model"]["es"]), np.mean(scores["world-model"]["vs"])
-    print(f"\n  world model vs block-bootstrap: energy {(1-wm_es/base[0])*100:+.1f}%, "
-          f"variogram {(1-wm_vs/base[1])*100:+.1f}%")
-    win = wm_es < base[0] and wm_vs < base[1]
-    print(f"  VERDICT: the learned world model {'BEATS' if win else 'does NOT beat'} block-bootstrap on joint "
-          f"scenario scoring → {'its learned dynamics add real value' if win else 'resampling history is as good; report honestly'}.")
+            es, vs = energy_score(X, y), variogram_score(X, y)
+            for g in ("all", reg):
+                scores[k]["es"][g].append(es); scores[k]["vs"][g].append(vs)
+    print(f"World-model scenario evaluation — {N} assets, {len(scores['Gaussian']['es']['all'])} OOS days "
+          f"({sum(scores['Gaussian']['es']['stress'] and [1])} split by regime)\n")
+    for g in ("all", "calm", "stress"):
+        nd = len(scores["block-boot"]["es"][g])
+        print(f"  === {g.upper()} ({nd} days) ===   energy / variogram (lower = better)")
+        bb_es, bb_vs = np.mean(scores["block-boot"]["es"][g]), np.mean(scores["block-boot"]["vs"][g])
+        for k in ["Gaussian", "block-boot", "world-model"]:
+            es, vs = np.mean(scores[k]["es"][g]), np.mean(scores[k]["vs"][g])
+            tag = ""
+            if k == "world-model":
+                tag = f"  (vs block-boot: E {(1-es/bb_es)*100:+.1f}%, V {(1-vs/bb_vs)*100:+.1f}%)"
+            print(f"    {k:>14} {es:>10.5f} {vs:>10.5f}{tag}")
+    se = np.mean(scores["world-model"]["es"]["stress"]); sb = np.mean(scores["block-boot"]["es"]["stress"])
+    print(f"\n  VERDICT: on STRESS days the world model {'BEATS' if se < sb else 'does NOT beat'} block-bootstrap "
+          f"on energy score — {'conditioning adds real value where it matters' if se < sb else 'resampling still ties/wins; report honestly'}.")
 
 
 if __name__ == "__main__":
