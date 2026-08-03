@@ -412,6 +412,58 @@ def run():
     print(f"\n  vs Bootstrap:  Energy {e_bb:+.1f}%  Variogram {v_bb:+.1f}%")
     print(f"  vs GARCH-FHS:  Energy {e_gf:+.1f}%  Variogram {v_gf:+.1f}%")
 
+    # ── Phase 3b: Multi-day (5-day) scenario evaluation ────────────────────
+    print("\nPhase 3b: Multi-day (5-day cumulative) evaluation …")
+    HORIZON = 5
+    n_eval_5d = len(test_w) - HORIZON
+    neural_es5, bb_es5 = [], []
+    neural_vs5, bb_vs5 = [], []
+    rng5 = np.random.RandomState(42)
+
+    for i in range(0, n_eval_5d, 2):  # stride 2 to save time
+        x_window = test_w[i]
+        # Actual 5-day cumulative return
+        cum_real = np.zeros(n_assets)
+        for d in range(HORIZON):
+            cum_real += test_w[i + 1 + d][:, -1]
+
+        gd = garch_cache[min(i, len(garch_cache) - 1)]
+        innovations, forecast_vols = gd
+
+        # Neural: simulate 5-day paths by compounding daily scenarios
+        per_m = (N_PATHS + N_SEEDS - 1) // N_SEEDS
+        cum_neural = np.zeros((N_PATHS, n_assets))
+        for d in range(HORIZON):
+            parts = [generate_scenarios_neural(m, x_window, gd, per_m)
+                     for m in models]
+            daily = np.concatenate(parts)[:N_PATHS]
+            cum_neural += daily
+
+        neural_es5.append(energy_score(cum_neural, cum_real))
+        neural_vs5.append(variogram_score(cum_neural, cum_real))
+
+        # Bootstrap: 5-day by summing independent single-day resamples
+        hist_rows = x_window.T
+        cum_bb = np.zeros((N_PATHS, n_assets))
+        for d in range(HORIZON):
+            cum_bb += block_bootstrap_scenarios(hist_rows, N_PATHS, 5, rng5)
+
+        bb_es5.append(energy_score(cum_bb, cum_real))
+        bb_vs5.append(variogram_score(cum_bb, cum_real))
+
+    me5, mv5 = np.mean(neural_es5), np.mean(neural_vs5)
+    be5, bv5 = np.mean(bb_es5), np.mean(bb_vs5)
+    e5_imp = (be5 - me5) / be5 * 100
+    v5_imp = (bv5 - mv5) / bv5 * 100
+
+    t_e5, p_e5 = ttest_rel(bb_es5, neural_es5)
+    t_v5, p_v5 = ttest_rel(bb_vs5, neural_vs5)
+
+    print(f"  5-day Neural: energy={me5:.4f}  variogram={mv5:.4f}")
+    print(f"  5-day BB:     energy={be5:.4f}  variogram={bv5:.4f}")
+    print(f"  Improvement:  Energy {e5_imp:+.1f}%  Variogram {v5_imp:+.1f}%")
+    print(f"  Significance: Energy p={p_e5:.4f}  Variogram p={p_v5:.4f}")
+
     # ── Anti-collapse ────────────────────────────────────────────────────────
     print("\nPhase 4: Anti-collapse …")
     m0 = models[0]
@@ -491,6 +543,9 @@ def run():
     print(f"  Variogram {'✓' if won_v else '✗'}  {v_bb:+.1f}% vs BB"
           f"  {'(p<0.05)' if sig_v else ''}")
     print(f"  Latent rank: {eff_rank:.0%}")
+    if e5_imp > 0:
+        print(f"  5-day:     Energy {e5_imp:+.1f}%  Variogram {v5_imp:+.1f}%"
+              f"  {'(p<0.05)' if p_e5 < 0.05 else ''}")
     print("=" * 80)
 
     results = dict(
@@ -504,6 +559,8 @@ def run():
         training_time_s=elapsed_train,
         n_params=sum(p.numel() for p in models[0].parameters()),
         verdict=verdict,
+        energy_5d_pct=e5_imp, variogram_5d_pct=v5_imp,
+        energy_5d_pvalue=p_e5, variogram_5d_pvalue=p_v5,
     )
     Path('results').mkdir(exist_ok=True)
     pd.DataFrame([results]).to_csv('results/neural_gauntlet_results.csv', index=False)
