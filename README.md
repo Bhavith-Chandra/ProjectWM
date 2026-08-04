@@ -381,23 +381,6 @@ Interactive tool:
 ├─ "What if tech earnings collapse 20%?"
 └─ → Returns portfolio paths, risk metrics, sector impacts
 ```
-
----
-
-## Implementation Roadmap
-
-| Phase | Duration | Key Milestones | Files |
-|-------|----------|----------------|-------|
-| **1: Representation** | 2-3 weeks | JEPA/GLP implementation, latent factorization, beat baseline | `meridian/jepa_encoder.py`, `meridian/glp.py` |
-| **2: Causality** | 2-3 weeks | DAG learning (PC/GES), intervention validation, N-th order tracing | `meridian/causal_dag.py`, `meridian/causal_effects.py` |
-| **3: Scenarios & Risk** | 1-2 weeks | 10k+ path generation, copula dependence, VaR/CVaR/ES backtesting | `meridian/scenario_gen.py`, `meridian/risk_metrics.py` |
-| **4: Portfolio Opt** | 1 week | Min-var, risk-parity, max-Sharpe, live rebalancing | `meridian/portfolio_optimizer.py` |
-| **5: Continual Learn** | 1 week | Online harness, replay buffer, regime detection, EWC | `meridian/continual_learning.py` |
-| **6: Interpretation** | 1 week | Dashboards, causal viz, what-if tool | `demo/world_model_dashboard.py` |
-| **Validation & Cleanup** | 1 week | Comprehensive backtests, documentation, edge cases | `scripts/comprehensive_benchmark.py` |
-
-**Total: ~6-8 weeks for a world-class financial world model**
-
 ---
 
 ## Success Criteria
