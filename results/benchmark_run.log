@@ -1,0 +1,31 @@
+================================================================================
+COMPREHENSIVE FINANCIAL WORLD MODEL BENCHMARK
+Comparing: JEPA vs GLP vs Block-Bootstrap Baseline
+================================================================================
+
+1. Loading data...
+   Data: 4675 days × 11 assets
+   Train: 4375, Test: 300
+
+2. Training models...
+   - JEPA...
+Traceback (most recent call last):
+  File "/Users/srimanarayana/Meridian/scripts/comprehensive_world_model_benchmark.py", line 328, in <module>
+    main()
+    ~~~~^^
+  File "/Users/srimanarayana/Meridian/scripts/comprehensive_world_model_benchmark.py", line 279, in main
+    jepa_model, jepa_history = train_jepa(X_train, epochs=50)
+                               ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Users/srimanarayana/Meridian/scripts/comprehensive_world_model_benchmark.py", line 75, in train_jepa
+    history = trainer.train_epoch(X_loader, epochs=epochs)
+  File "/Users/srimanarayana/Meridian/meridian/jepa_encoder.py", line 244, in train_epoch
+    output = self.model(x_batch)
+  File "/opt/homebrew/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/Users/srimanarayana/Meridian/meridian/jepa_encoder.py", line 141, in forward
+    B, T, D = x.shape
+    ^^^^^^^
+ValueError: not enough values to unpack (expected 3, got 2)

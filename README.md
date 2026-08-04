@@ -134,6 +134,77 @@ Meridian-WM here is a reproducible per-fold ensemble, distinct from the heavier 
 ensemble validated separately (see `MODEL_CARD.md`). Reproduce: `python scripts/benchmark_vol.py`;
 full numbers in `results/benchmark_vol.{json,csv}`.
 
+## Scenario generation: regime-conditioned GARCH-FHS
+
+The world model's scenario engine generates **calibrated multi-asset Monte Carlo scenarios** using
+expanding-window GJR-GARCH(1,1) with Filtered Historical Simulation. This is the core of risk
+measurement — it feeds VaR/ES, portfolio optimization, and stress testing.
+
+**Why GARCH-FHS, not a neural generator?** We tested both. The neural approach (354K-param GRU +
+8-head cross-asset attention with 20% vol blending) adds <0.5% lift over pure GARCH-FHS at every
+horizon — the GARCH model already captures the volatility clustering and leverage effects the
+neural net tries to learn. Simpler wins.
+
+**Key design choices:**
+- **Expanding window**: fit on ALL available history (4000+ days), not a sliding window — more data
+  = better GARCH parameter estimates
+- **GJR asymmetry**: captures leverage effect (negative returns → higher vol) that symmetric
+  GARCH misses
+- **VIX-based regime conditioning**: innovation resampling weighted by current regime (low/mid/high
+  vol) with EWMA decay — recent innovations matter more
+- **Horizon-adaptive block lengths**: block_len=1 for 1–5d (independence), 3 for 10d, 5 for 20d
+  (preserves autocorrelation structure at longer horizons)
+
+### Benchmark: GARCH-FHS vs block bootstrap (the standard)
+
+Tested on **35 ETFs** (US equity, sectors, international, fixed income, commodities, alternatives)
+with **18 features** from 5 data sources (Yahoo, FRED, Fama-French, VIX term structure,
+cross-asset derived). 160 eval windows, 1000 scenarios each, 504-day (2-year) test period.
+
+| Horizon | Energy Score vs BB | p-value | Verdict |
+|---------|-------------------|---------|---------|
+| 1d | +2.0% | 0.020 | WIN |
+| 5d | +5.4% | 0.00002 | WIN |
+| 10d | +12.5% | <1e-6 | WIN |
+| 20d | +18.9% | <1e-6 | WIN |
+
+Margins compound with horizon — the expanding-window GARCH captures vol dynamics that fixed-window
+bootstrap cannot. On the original 11-asset universe, all 4 horizons are statistically significant
+(p<0.005), including 1d at +2.6% (p=0.004).
+
+## DreamerV3-style world model core
+
+The neural world model (`meridian/world_model/`) implements a **DreamerV3-style RSSM** adapted for
+financial time series — discrete categorical latents (32x32), symlog predictions, KL balancing.
+This is the generative backbone for forward simulation and what-if analysis.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Encoder: Mamba SSM (content-aware, HiPPO init)            │
+│     or GRU backbone (switchable)                           │
+├─────────────────────────────────────────────────────────────┤
+│  RSSM: 32×32 discrete categoricals                         │
+│     prior: p(z_t | h_t)    posterior: q(z_t | h_t, x_t)   │
+│     KL balancing (α=0.8 free nats)                         │
+├─────────────────────────────────────────────────────────────┤
+│  Graph: GAT (multi-head attention over asset dimension)    │
+│     learns cross-asset dependencies from data              │
+├─────────────────────────────────────────────────────────────┤
+│  Heads: returns · volatility · tail · regime · covariance  │
+│     each a specialist decoder with its own loss             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Additional modules
+
+| Module | Path | Purpose |
+|--------|------|---------|
+| **Risk engine** | `meridian/risk/engine.py` | VaR, ES, component risk, stress testing |
+| **Portfolio optimizer** | `meridian/portfolio/optimizer.py` | Mean-variance, HRP, Risk Parity, Black-Litterman, CVaR |
+| **Causal discovery** | `meridian/causal/discovery.py` | NOTEARS structure learning, transfer entropy, nth-order shock propagation |
+| **Continual learning** | `meridian/continual/olora.py` | O-LoRA adapters + regime replay for online adaptation |
+| **Scoring** | `meridian/eval/scoring.py` | Energy score, variogram score (proper scoring rules) |
+
 ## Layout
 
 ```
@@ -147,9 +218,24 @@ meridian/                           the modules (the routed specialists)
   tools.py           conversational contract (LLM routes/explains; modules own numbers)
   network.py         generalized-IRF shock propagation ("what-if" scenarios)
   switching.py, meridian_wm.py   regime module internals
+  world_model/       DreamerV3-style RSSM (Mamba/GRU + GAT + multi-head decoders)
+    rssm.py          32×32 discrete categoricals, symlog, KL balancing
+    encoder.py       Mamba SSM + GRU backbone (switchable)
+    graph.py         GAT cross-asset attention
+    heads.py         returns, vol, tail, regime, covariance heads
+    model.py         MeridianWorldModel (composes all components)
+    scenario.py      Monte Carlo with antithetic sampling
+    trainer.py       composite loss training
+  risk/engine.py     VaR, ES, component risk, stress testing
+  portfolio/optimizer.py  MV, HRP, Risk Parity, BL, CVaR optimization
+  causal/discovery.py     NOTEARS, transfer entropy, nth-order propagation
+  continual/olora.py      O-LoRA adapters + regime replay
+  eval/scoring.py         energy score, variogram score
 scripts/
   ask.py             interactive CLI: analyze / compare / scenario / world / portfolio
   benchmark_vol.py   forecasting benchmark (universes × horizons, all metrics, MCS)
+  benchmark_ultimate.py  GARCH-FHS vs bootstrap gauntlet (11 ETFs, 4 horizons)
+  benchmark_mega.py      mega benchmark (35 ETFs, 18 features, 5 data sources)
   frontier_intraday.py   intraday-measure ladder + Regime-Meridian (champion)
   interpret_meridian.py  layer-by-layer interpretation (coeffs, ablation, per-regime)
   risk_benchmark.py  portfolio-risk + tail-risk benchmark
