@@ -1,0 +1,72 @@
+{
+  "model_params": {
+    "sheaf": 818103,
+    "manifold": 25028,
+    "renorm": 1137828,
+    "topo_rssm": 2349633,
+    "reflexive": 7188992,
+    "causal_dag": 576876,
+    "return_head": 616995,
+    "vol_head": 550691,
+    "tail_head": 275107,
+    "regime_head": 271108,
+    "cov_head": 1163323,
+    "portfolio": 2524775,
+    "total": 17498459
+  },
+  "config": {
+    "n_assets": "35",
+    "asset_class_map": "{'equity': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 'fixed_income': [10, 11, 12, 13, 14], 'commodity': [15, 16, 17, 18, 19], 'fx': [20, 21, 22, 23, 24], 'alternatives': [25, 26, 27, 28, 29], 'crypto': [30, 31, 32, 33, 34]}",
+    "input_dims": "{'equity': 18, 'fixed_income': 14, 'commodity': 12, 'fx': 10, 'alternatives': 10, 'crypto': 12}",
+    "common_dim": "128",
+    "n_diffusion_layers": "3",
+    "frac_diff_d": "0.4",
+    "h_dim": "64",
+    "s_dim": "32",
+    "e_dim": "32",
+    "rg_n_heads": "4",
+    "hidden_dim": "512",
+    "topo_dim": "64",
+    "n_categoricals": "32",
+    "n_classes": "32",
+    "belief_dim": "512",
+    "max_deq_iter": "10",
+    "jac_reg": "0.01",
+    "n_scenarios": "64",
+    "max_weight": "0.2",
+    "n_factors": "32",
+    "dropout": "0.1",
+    "return_window": "60"
+  },
+  "training": {
+    "epochs": 3,
+    "lr": 0.0003,
+    "best_val_mse": 0.017935918644070625
+  },
+  "history": [
+    {
+      "epoch": 1,
+      "train_loss": 481.6579895019531,
+      "mse": 0.12815894186496735,
+      "mae": 0.2639651894569397,
+      "direction_accuracy": 0.4535714387893677,
+      "time": 454.8336601257324
+    },
+    {
+      "epoch": 2,
+      "train_loss": 472.148681640625,
+      "mse": 0.08351905643939972,
+      "mae": 0.20346461236476898,
+      "direction_accuracy": 0.4821428656578064,
+      "time": 541.9044568538666
+    },
+    {
+      "epoch": 3,
+      "train_loss": 442.1329574584961,
+      "mse": 0.017935918644070625,
+      "mae": 0.09975143522024155,
+      "direction_accuracy": 0.5035714507102966,
+      "time": 421.9499990940094
+    }
+  ]
+}
